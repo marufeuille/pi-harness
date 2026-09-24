@@ -14,6 +14,13 @@ test("モデル出力の JSON を読む", () => {
   assert.equal(parsePlan(raw).tasks[0]?.id, "add-greet");
 });
 
+test("JSON 抽出は従来どおり不正形式を失敗させる", () => {
+  assert.throws(() => parseJsonBlock("本文だけ"), /JSON/);
+  assert.throws(() => parseJsonBlock("```json\\n壊れた\\n```"), /JSON/);
+  assert.throws(() => parseJsonBlock("前置き {壊れた} 後置き"), /JSON/);
+  assert.deepEqual(parseJsonBlock('{"ok":true}'), { ok: true });
+});
+
 test("曖昧なチケットは質問付きで突き返す", () => {
   assert.deepEqual(parseClarification({ decision: "return", questions: ["失敗時の戻り値は何か"] }), {
     decision: "return",
