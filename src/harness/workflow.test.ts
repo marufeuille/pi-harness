@@ -200,7 +200,14 @@ test("同じファイルを触る並列タスクは衝突として人に返す",
     });
     assert.equal(result.status, "escalated");
     if (result.status === "escalated") {
+      assert.equal(result.stop.kind, "conflict");
       assert.match(result.reason, /衝突/);
+      assert.match(result.stop.lastOutput, /衝突/);
+      assert.equal(result.stop.worktree, result.integrationPath);
+      assert.ok(result.stop.branch);
+      assert.match(result.stop.recommendation, /取り込み/);
+      assert.ok(result.resumeState);
+      assert.ok(result.resumeState.remainingTasks.length > 0);
     }
   } finally {
     await rm(repo, { recursive: true, force: true });
@@ -332,6 +339,476 @@ test("PR 以降は設定がオンのときだけ、その順で呼ぶ", async ()
     });
     assert.deepEqual(called, ["pr", "ci", "merge", "production"]);
     assert.equal(result.status, "production-ok");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("要求を満たし懸念だけの実行は上限でも次のフェーズへ進む", async () => {
+  const repo = await initRepo();
+  try {
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 1 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async () => {},
+        review: async () => ({ decision: "pass", concerns: ["ログの文言は後でよい"] }),
+      }),
+    });
+    assert.equal(result.status, "ready");
+    if (result.status === "ready") {
+      assert.deepEqual(result.concerns, ["ログの文言は後でよい"]);
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("減っている致命的な残件は上限で止まり、追加回数で同じブランチの残件だけ続く", async () => {
+  const repo = await initRepo();
+  const issue = (id: string) => ({ id, title: id, dependsOn: [] as string[], instructions: id });
+  try {
+    let reviews = 0;
+    let clarifies = 0;
+    let plans = 0;
+    const implemented: string[] = [];
+    const first = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 2 } },
+      steps: steps({
+        clarify: async () => {
+          clarifies += 1;
+          return { decision: "proceed", assumptions: ["失敗は例外"] };
+        },
+        plan: async () => {
+          plans += 1;
+          return {
+            assumptions: [],
+            tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+          };
+        },
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => {
+          reviews += 1;
+          if (reviews === 1) {
+            return { decision: "fix", issues: [issue("fix-a"), issue("fix-b")] };
+          }
+          return { decision: "fix", issues: [issue("fix-a")] };
+        },
+      }),
+    });
+    assert.equal(first.status, "escalated");
+    if (first.status !== "escalated") throw new Error("expected stop");
+    assert.equal(first.stop.kind, "decreasing-fatal");
+    assert.equal(first.stop.trend, "decreasing");
+    assert.match(first.stop.lastOutput, /fix-a/);
+    assert.equal(first.stop.worktree, first.integrationPath);
+    assert.ok(first.stop.branch);
+    assert.match(first.stop.recommendation, /追加回数/);
+    assert.equal(first.resumeState.originalMaxLoops, 2);
+    assert.deepEqual(implemented, ["feature", "fix-a", "fix-b"]);
+    const cfg = { ...config, review: { maxLoops: 2 } };
+    const resumed = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: cfg,
+      steps: steps({
+        clarify: async () => {
+          clarifies += 1;
+          throw new Error("再開で要件確認しない");
+        },
+        plan: async () => {
+          plans += 1;
+          throw new Error("再開で最初からプランしない");
+        },
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => ({ decision: "pass", concerns: ["文言"] }),
+      }),
+      resume: { state: first.resumeState, extraRounds: 1 },
+    });
+    assert.equal(cfg.review.maxLoops, 2);
+    assert.equal(clarifies, 1);
+    assert.equal(plans, 1);
+    assert.equal(resumed.status, "ready");
+    assert.equal(resumed.integrationPath, first.integrationPath);
+    assert.equal(resumed.runId, first.runId);
+    assert.deepEqual(implemented, ["feature", "fix-a", "fix-b", "fix-a"]);
+    const branches = await git(repo, ["branch"]);
+    assert.equal([...branches.matchAll(/integration/g)].length, 1);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("同じ指摘が続くと残り周を使わず止まり、回数追加の再開はできない", async () => {
+  const repo = await initRepo();
+  const issue = { id: "fix-a", title: "境界", dependsOn: [] as string[], instructions: "空白を拒否する" };
+  try {
+    let reviews = 0;
+    const implemented: string[] = [];
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 3 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => {
+          reviews += 1;
+          return { decision: "fix", issues: [issue] };
+        },
+      }),
+    });
+    assert.equal(reviews, 2);
+    assert.deepEqual(implemented, ["feature", "fix-a"]);
+    assert.equal(result.status, "escalated");
+    if (result.status !== "escalated") throw new Error("expected stop");
+    assert.equal(result.stop.kind, "stalled");
+    assert.equal(result.stop.trend, "same");
+    assert.match(result.stop.recommendation, /ヒント|プラン/);
+    assert.equal(result.stop.recommendation.includes("追加回数"), false);
+    await assert.rejects(
+      runWorkflow({
+        repo,
+        ticketPath: await writeTicket(),
+        config,
+        steps: steps({
+          clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        }),
+        resume: { state: result.resumeState, extraRounds: 2 },
+      }),
+      /追加回数/,
+    );
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("停滞からの再開はヒントを残件に足すか残件だけ再プランする", async () => {
+  const repo = await initRepo();
+  const issue = { id: "fix-a", title: "境界", dependsOn: [] as string[], instructions: "空白を拒否する" };
+  try {
+    const stalled = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 3 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async () => {},
+        review: async () => ({ decision: "fix", issues: [issue] }),
+      }),
+    });
+    if (stalled.status !== "escalated") throw new Error("expected stop");
+    const hintedIds: string[] = [];
+    let hintedInstructions = "";
+    const hinted = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => {
+          throw new Error("再開で要件確認しない");
+        },
+        plan: async () => {
+          throw new Error("ヒント再開では再プランしない");
+        },
+        implement: async ({ task }) => {
+          hintedIds.push(task.id);
+          hintedInstructions = task.instructions;
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+      resume: { state: stalled.resumeState, hint: "既存テストを壊さない" },
+    });
+    assert.equal(hinted.status, "ready");
+    assert.deepEqual(hintedIds, ["fix-a"]);
+    assert.match(hintedInstructions, /既存テストを壊さない/);
+
+    const stalledAgain = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 3 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async () => {},
+        review: async () => ({ decision: "fix", issues: [issue] }),
+      }),
+    });
+    if (stalledAgain.status !== "escalated") throw new Error("expected stop");
+    const planned: string[][] = [];
+    const implemented: string[] = [];
+    const replanned = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => {
+          throw new Error("再開で要件確認しない");
+        },
+        plan: async ({ remaining }) => {
+          planned.push((remaining ?? []).map((task) => task.id));
+          return {
+            assumptions: ["残件だけ"],
+            tasks: [{ id: "replan-1", title: "残件", dependsOn: [], instructions: "残件だけ直す" }],
+          };
+        },
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+      resume: { state: stalledAgain.resumeState, replanRemaining: true },
+    });
+    assert.equal(replanned.status, "ready");
+    assert.deepEqual(planned, [["fix-a"]]);
+    assert.deepEqual(implemented, ["replan-1"]);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("要求不足の検品は質問を返し、回答は仮定として同じブランチの続きになる", async () => {
+  const repo = await initRepo();
+  try {
+    const first = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: ["名前は必須"] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async () => {},
+        review: async () => ({ decision: "return", questions: ["失敗時の戻り値は何か"] }),
+      }),
+    });
+    assert.equal(first.status, "returned");
+    if (first.status !== "returned") throw new Error("expected questions");
+    assert.deepEqual(first.questions, ["失敗時の戻り値は何か"]);
+    assert.equal(first.stop?.kind, "insufficient-requirements");
+    assert.ok(first.resumeState);
+    assert.ok(first.integrationPath);
+    const resumed = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => {
+          throw new Error("再開で要件確認しない");
+        },
+        plan: async () => {
+          throw new Error("回答再開では再プランしない");
+        },
+        implement: async () => {
+          throw new Error("残件が空なら実装しない");
+        },
+        review: async ({ plan }) => {
+          assert.ok(plan.assumptions.includes("400 を返す"));
+          return { decision: "pass", concerns: [] };
+        },
+      }),
+      resume: { state: first.resumeState, answers: ["400 を返す"] },
+    });
+    assert.equal(resumed.status, "ready");
+    assert.equal(resumed.integrationPath, first.integrationPath);
+    if (resumed.status === "ready") {
+      assert.ok(resumed.assumptions.includes("400 を返す"));
+      assert.ok(resumed.assumptions.includes("名前は必須"));
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("作業ツリーのブランチ逸脱は修正ループとは別の種類で止まる", async () => {
+  const repo = await initRepo();
+  try {
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ worktree }) => {
+          await execFileAsync("git", ["checkout", "-b", "drift"], { cwd: worktree.path });
+        },
+        review: async () => {
+          throw new Error("逸脱したら検品まで進まない");
+        },
+      }),
+    });
+    assert.equal(result.status, "escalated");
+    if (result.status === "escalated") {
+      assert.equal(result.stop.kind, "branch-deviation");
+      assert.match(result.stop.lastOutput, /外れました/);
+      assert.match(result.stop.recommendation, /取り込み/);
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("環境由来のチェック失敗は修正ループとは別の種類で止まる", async () => {
+  const repo = await initRepo();
+  try {
+    const implemented: string[] = [];
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 3 }, checks: ["__harness_missing_cmd_xyz__"] },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => {
+          throw new Error("環境失敗は検品しない");
+        },
+      }),
+    });
+    assert.deepEqual(implemented, ["feature"]);
+    assert.equal(result.status, "escalated");
+    if (result.status === "escalated") {
+      assert.equal(result.stop.kind, "environment-check");
+      assert.match(result.stop.lastOutput, /not found|command not found/i);
+      assert.match(result.stop.recommendation, /取り込み/);
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("同じチェック失敗は早期停止し、中身が変わるチェックは上限まで続ける", async () => {
+  const repo = await initRepo();
+  try {
+    const sameImplemented: string[] = [];
+    const same = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 3 }, checks: ["sh -c 'echo same-fail; exit 1'"] },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          sameImplemented.push(task.id);
+        },
+        review: async () => {
+          throw new Error("同じ失敗では検品しない");
+        },
+      }),
+    });
+    assert.equal(same.status, "escalated");
+    if (same.status === "escalated") {
+      assert.equal(same.stop.kind, "stalled");
+      assert.equal(same.stop.trend, "same");
+      assert.match(same.stop.lastOutput, /same-fail/);
+    }
+    assert.equal(sameImplemented.filter((id) => id.startsWith("checks-")).length, 1);
+
+    const changeImplemented: string[] = [];
+    let reviews = 0;
+    const changingCheck =
+      "sh -c 'i=0; [ -f .check-n ] && i=$(cat .check-n); i=$((i+1)); echo $i > .check-n; echo fail-$i; exit 1'";
+    const changing = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 3 }, checks: [changingCheck] },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          changeImplemented.push(task.id);
+        },
+        review: async () => {
+          reviews += 1;
+          return { decision: "fix", issues: [{ id: "still", title: "still", dependsOn: [], instructions: "still" }] };
+        },
+      }),
+    });
+    assert.equal(reviews, 1);
+    assert.equal(changeImplemented.filter((id) => id.startsWith("checks-")).length, 2);
+    assert.equal(changing.status, "escalated");
+    if (changing.status === "escalated") {
+      assert.equal(changing.stop.kind, "changing");
+      assert.equal(changing.stop.trend, "shifted");
+      assert.match(changing.stop.recommendation, /追加回数/);
+      assert.match(changing.stop.recommendation, /ヒント/);
+      assert.match(changing.stop.recommendation, /再プラン/);
+      assert.doesNotThrow(() =>
+        assert.ok(["extraRounds", "hint", "replanRemaining"].every((name) =>
+          changing.stop.recommendation.includes(name === "extraRounds" ? "追加回数" : name === "hint" ? "ヒント" : "再プラン"),
+        )),
+      );
+    }
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("変化したチェック失敗でも要求を満たしていれば懸念を持って進む", async () => {
+  const repo = await initRepo();
+  try {
+    const changingCheck =
+      "sh -c 'i=0; [ -f .check-n ] && i=$(cat .check-n); i=$((i+1)); echo $i > .check-n; echo fail-$i; exit 1'";
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 2 }, checks: [changingCheck] },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async () => {},
+        review: async () => ({ decision: "pass", concerns: ["フレークしうる"] }),
+      }),
+    });
+    assert.equal(result.status, "ready");
+    if (result.status === "ready") {
+      assert.ok(result.concerns.includes("フレークしうる"));
+    }
   } finally {
     await rm(repo, { recursive: true, force: true });
   }

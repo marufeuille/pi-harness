@@ -51,7 +51,14 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
       return "decision" in value && value.decision === "json-read-failed" ? value : parseClarification(value);
     },
 
-    async plan({ ticket, assumptions, cwd }) {
+    async plan({ ticket, assumptions, cwd, remaining }) {
+      const remainingBlock = remaining && remaining.length > 0
+        ? [
+            "次の残件だけを対象にプランを作り直してください。完了済みの作業は入れず、再実行もしないでください。",
+            remaining.map((task) => `- ${task.id}: ${task.title}\n${task.instructions}`).join("\n"),
+            "",
+          ]
+        : [];
       const text = await runRole({
         role: "smart", fixture, stage: "plan",
         model: smart,
@@ -63,7 +70,7 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
           "依存があるものだけ dependsOn にタスク id を入れてください。",
           "id は英数字で始まる短い名前です。instructions に、そのタスクで満たす境界を書いてください。",
           "細かく切りすぎないでください。",
-          "",
+          ...remainingBlock,
           "JSON だけを ```json ブロックで返してください。",
           '{"assumptions":["..."],"tasks":[{"id":"add-greet","title":"...","dependsOn":[],"instructions":"..."}]}',
           "",
@@ -111,16 +118,19 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
           "以下はハーネスが安全な読み取り専用経路で取得した差分です。",
           execFileSync("git", ["diff", "--no-ext-diff", baseSha, "--"], { cwd, encoding: "utf8" }),
           "直すべきなのは、要求との不一致と重大なセキュリティ上の問題だけです。",
-          "記法、わずかな非効率、確率の低い懸念は concerns に残さず捨ててください。",
+          "記法、わずかな非効率、確率の低い懸念は捨ててください。残すなら concerns だけです。",
           `これは ${attempt} 回目で、上限は ${maxLoops} 回です。`,
-          "上限に近く、致命的な問題が残っていないなら decision は pass にし、残った懸念だけ concerns に書いてください。",
-          "致命的な問題が残るなら decision は fix にし、安いモデルが直せるタスクを issues に書いてください。",
+          "致命的な残件（要求との不一致、重大なセキュリティ上の問題）があるときだけ decision は fix にし、安いモデルが直せるタスクを issues に書いてください。",
+          "要求は満たしていて残っているのが致命的でない懸念だけのときは decision は pass にし、concerns に書いてください。上限でも人に戻さず、懸念は後の PR に渡せます。",
+          "実装の途中で入出力の境界が足りないときは decision は return にし、questions に質問を書いてください。",
           "このまま人に返すしかないときは decision は escalate にしてください。",
           "",
           "JSON だけを ```json ブロックで返してください。",
           '{"decision":"pass","concerns":[]}',
           "または",
           '{"decision":"fix","issues":[{"id":"fix-boundary","title":"...","dependsOn":[],"instructions":"..."}]}',
+          "または",
+          '{"decision":"return","questions":["..."]}',
           "または",
           '{"decision":"escalate","reason":"..."}',
           "",
