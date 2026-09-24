@@ -39,7 +39,7 @@ if (process.env.HARNESS_E2E_FIXTURE) {
     throw new Error("固定応答実行では外部フェーズを有効にできません");
   }
   const raw = JSON.parse(await readFile(path.resolve(process.env.HARNESS_E2E_FIXTURE), "utf8")) as { calls?: unknown };
-  if (!Array.isArray(raw.calls) || !raw.calls.every((item) => item && typeof item === "object" && typeof item.stage === "string" && typeof item.response === "string")) {
+  if (!Array.isArray(raw.calls) || !raw.calls.every((item) => item && typeof item === "object" && typeof item.stage === "string" && typeof item.text === "string" && (item.writes === undefined || (Array.isArray(item.writes) && item.writes.every((write) => write && typeof write === "object" && typeof write.path === "string" && typeof write.content === "string"))))) {
     throw new Error("固定応答フィクスチャの形式が不正です");
   }
   fixture = { calls: raw.calls as OfflineFixture["calls"], index: 0 };
