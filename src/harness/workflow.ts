@@ -65,9 +65,9 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
   const ticket = input.ticket ?? (input.ticketPath ? await loadTicket(input.ticketPath) : undefined);
   if (!ticket) throw new Error("チケット入力がありません");
   await ensureGitRepo(input.repo);
-  const base = await resolveBase(input.repo, input.baseRevision);
   const run = beginRun(input);
-  run.baseBranch = base.branch;
+  const base = await resolveBase(input.repo, input.baseRevision);
+  run.baseBranch = input.baseRevision ? `harness/${run.runId}/base` : base.branch;
   run.baseSha = base.sha;
 
   phase("要件を確認する");
