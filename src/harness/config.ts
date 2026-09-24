@@ -24,10 +24,14 @@ function model(value: unknown, label: string): ModelSpec {
   const v = asRecord(value, label);
   if (typeof v.provider !== "string" || !v.provider.trim()) throw new Error(`${label}.provider must be a non-empty string`);
   if (typeof v.id !== "string" || !v.id.trim()) throw new Error(`${label}.id must be a non-empty string`);
-  if (v.effort !== undefined && (typeof v.effort !== "string" || !v.effort)) throw new Error(`${label}.effort must be a non-empty string`);
-  if (v.fast !== undefined && typeof v.fast !== "boolean") throw new Error(`${label}.fast must be boolean`);
-  if (v.contextWindow !== undefined && (typeof v.contextWindow !== "number" || !Number.isInteger(v.contextWindow) || v.contextWindow < 1)) throw new Error(`${label}.contextWindow must be a positive integer`);
-  return { ...v, provider: v.provider, id: v.id } as ModelSpec;
+  let parameters: Record<string, unknown> | undefined;
+  if (v.parameters !== undefined) {
+    parameters = asRecord(v.parameters, `${label}.parameters`);
+    if (parameters.effort !== undefined && (typeof parameters.effort !== "string" || !parameters.effort)) throw new Error(`${label}.parameters.effort must be a non-empty string`);
+    if (parameters.fast !== undefined && typeof parameters.fast !== "boolean") throw new Error(`${label}.parameters.fast must be boolean`);
+    if (parameters.contextWindow !== undefined && (typeof parameters.contextWindow !== "number" || !Number.isInteger(parameters.contextWindow) || parameters.contextWindow < 1)) throw new Error(`${label}.parameters.contextWindow must be a positive integer`);
+  }
+  return { provider: v.provider, id: v.id, ...(parameters === undefined ? {} : { parameters }) } as ModelSpec;
 }
 function nonempty(v: unknown, l: string): string { if (typeof v === "string" && v.trim()) return v; throw new Error(`${l} must be non-empty`); }
 function flag(v: unknown,l:string):boolean { if(typeof v==="boolean")return v; throw new Error(`${l} must be boolean`); }
