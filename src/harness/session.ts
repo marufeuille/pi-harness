@@ -155,14 +155,24 @@ export async function runRole(options: {
       ...model,
       ...(typeof parameters.contextWindow === "number" ? { contextWindow: parameters.contextWindow } : {}),
     });
-    await session.setThinkingLevel(parameters.effort as any);
+    // Reject unsupported levels rather than allowing the session to silently
+    // coerce them to a nearby thinking level.
+    const supportedThinkingLevels = model.reasoning ? ["minimal", "low", "medium", "high", "xhigh"] : ["off"];
+    if (parameters.effort !== undefined && !supportedThinkingLevels.includes(parameters.effort as string)) {
+      throw new Error(`モデルが effort ${String(parameters.effort)} をサポートしていません`);
+    }
+    if (parameters.effort !== undefined) await session.setThinkingLevel(parameters.effort as any);
     const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
     const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
     if (!logCreated) {
       throw new Error("profiler のログファイルを作成できませんでした");
     }
 
-    await session.prompt(options.prompt, { ...parameters } as any);
+    // These are invocation-level stream settings in Pi. PromptOptions itself
+    // does not define provider parameters; streamOptions are forwarded to the
+    // active model's stream call by the SDK.
+    const { effort: _effort, contextWindow: _contextWindow, ...streamOptions } = parameters;
+    await session.prompt(options.prompt, { streamOptions });
     const text = session.getLastAssistantText();
     if (!text) {
       throw new Error("モデルがテキストを返しませんでした");
