@@ -78,7 +78,7 @@ test("actual Pi tool call/result events log completed operations for both roles,
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
 });
 
-test("Cursor native operation lifecycle records completed actions, not starts", async () => {
+test("Pi tool lifecycle records completed actions, not start notifications", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "profiler-test-"));
   const handlers = new Map<string, (event: any, ctx?: any) => Promise<void>>();
   const pi = { on: (name: string, handler: (event: any, ctx?: any) => Promise<void>) => handlers.set(name, handler) } as any;
@@ -86,18 +86,20 @@ test("Cursor native operation lifecycle records completed actions, not starts", 
   try {
     profiler(pi);
     await handlers.get("session_start")!({}, { cwd });
-    for (const [id, operation, input] of [
+    const call = handlers.get("tool_call")!;
+    const resultEvent = handlers.get("tool_result")!;
+    for (const [id, toolName, input] of [
       ["read", "read_file", { path: "src/a.ts" }],
       ["write", "write_file", { path: "src/b.ts" }],
       ["cmd", "run_command", { command: `CURSOR_API_KEY=${secret} npm test` }],
       ["search", "search", { pattern: "needle" }],
     ] as const) {
-      await handlers.get("cursor_operation_start")!({ id, operation, input });
+      await call({ toolCallId: id, toolName, input });
     }
     const logfile = path.join(cwd, ".pi-observability", fs.readdirSync(path.join(cwd, ".pi-observability"))[0]);
     assert.equal(fs.readFileSync(logfile, "utf8").split("\n").length, 2);
-    for (const [id, result] of [["read", "contents"], ["write", "written"], ["cmd", "passed"], ["search", "matches"]]) {
-      await handlers.get("cursor_operation_end")!({ id, result, isError: false });
+    for (const [id, output] of [["read", "contents"], ["write", "written"], ["cmd", "passed"], ["search", "matches"]]) {
+      await resultEvent({ toolCallId: id, content: [{ type: "text", text: output }], isError: false });
     }
     const text = fs.readFileSync(logfile, "utf8");
     const records = text.trim().split("\n").map((line) => JSON.parse(line));
