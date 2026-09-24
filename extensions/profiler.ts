@@ -52,14 +52,14 @@ function hash(value: unknown): string {
     .slice(0, 12);
 }
 
-function extractTextSize(result: any): number {
-  if (!result?.content) {
+function extractTextSize(content: unknown): number {
+  if (!Array.isArray(content)) {
     return 0;
   }
 
   let size = 0;
 
-  for (const item of result.content) {
+  for (const item of content) {
     if (item?.type === "text" && typeof item.text === "string") {
       size += item.text.length;
     } else {
@@ -128,10 +128,10 @@ export default function profiler(pi: ExtensionAPI) {
    * Tool実行前
    */
   pi.on("tool_call", async (event) => {
-    const inputChars = sizeOf(event.args);
+    const inputChars = sizeOf(event.input);
     const inputHash = hash({
       tool: event.toolName,
-      args: event.args,
+      input: event.input,
     });
 
     const duplicateInputCount =
@@ -169,7 +169,7 @@ export default function profiler(pi: ExtensionAPI) {
       performance.now() - current.startedAt;
 
     const outputChars =
-      extractTextSize(event.result);
+      extractTextSize(event.content);
 
     const duplicateInputCount =
       seenInputs.get(current.inputHash) ?? 1;
