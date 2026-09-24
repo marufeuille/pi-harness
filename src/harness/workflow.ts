@@ -5,6 +5,7 @@ import type { WorkflowConfig } from "./config.ts";
 import type { Plan, PullRequest, Steps, Task, Ticket } from "./contract.ts";
 import { archiveProfilerLogs } from "./observability.ts";
 import { schedule } from "./schedule.ts";
+import { maskSecrets } from "./mask.ts";
 import { loadTicket } from "./ticket.ts";
 import {
   commitsAhead,
@@ -37,7 +38,10 @@ type Outcome =
   | { status: "production-ok"; summary: string; assumptions: string[]; concerns: string[] }
   | { status: "production-failed"; summary: string };
 
+export type JsonReadFailure = { stage: string; attempt: number; text: string };
+
 export type WorkflowResult = Outcome & {
+  jsonReadFailures: JsonReadFailure[];
   runId: string;
   runDir: string;
   integrationPath?: string;
@@ -53,6 +57,7 @@ type Run = {
   config: WorkflowConfig;
   steps: Steps;
   integration?: Worktree;
+  jsonReadFailures: JsonReadFailure[];
 };
 
 export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult> {
@@ -61,8 +66,13 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
   const run = beginRun(input);
 
   phase("要件を確認する");
-  const clarification = await input.steps.clarify({ ticket, cwd: input.repo });
+  let clarification;
+  clarification = await input.steps.clarify({ ticket, cwd: input.repo });
   await keepLogs(run, "clarify", input.repo);
+  if ("decision" in clarification && clarification.decision === "json-read-failed") {
+    recordJsonFailure(run, clarification);
+    return finish(run, { status: "returned", questions: ["要件確認の返答から JSON を読み取れませんでした"] });
+  }
   if (clarification.decision === "return") {
     return finish(run, { status: "returned", questions: clarification.questions });
   }
@@ -73,12 +83,13 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
   }
 
   phase("プランを作る");
-  const plan = await input.steps.plan({
-    ticket,
-    assumptions: clarification.assumptions,
-    cwd: input.repo,
-  });
+  let plan;
+  plan = await input.steps.plan({ ticket, assumptions: clarification.assumptions, cwd: input.repo });
   await keepLogs(run, "plan", input.repo);
+  if ("decision" in plan && plan.decision === "json-read-failed") {
+    recordJsonFailure(run, plan);
+    return finish(run, { status: "returned", questions: ["プランの返答から JSON を読み取れませんでした"] });
+  }
 
   run.integration = await openIntegrationWorktree(input.repo, run.runId);
   run.baseSha = await headSha(run.integration.path);
@@ -228,15 +239,14 @@ async function reviewUntilAcceptable(
     }
 
     phase(`検品する ${attempt}/${maxLoops}`);
-    const review = await run.steps.review({
-      ticket,
-      plan,
-      attempt,
-      maxLoops,
-      cwd: integration(run).path,
-      baseSha: run.baseSha,
-    });
+    let review;
+    review = await run.steps.review({ ticket, plan, attempt, maxLoops, cwd: integration(run).path, baseSha: run.baseSha });
     await keepLogs(run, `review-${attempt}`, integration(run).path);
+    if (review.decision === "json-read-failed") {
+      recordJsonFailure(run, review);
+      if (attempt === maxLoops) return { decision: "escalate", reason: "修正ループの上限に達したため、人に戻します" };
+      continue;
+    }
     if (review.decision === "pass" || review.decision === "escalate") {
       return review;
     }
@@ -265,6 +275,7 @@ function beginRun(input: WorkflowInput): Run {
     baseSha: "",
     config: input.config,
     steps: input.steps,
+    jsonReadFailures: [],
   };
 }
 
@@ -284,12 +295,17 @@ async function keepLogs(run: Run, label: string, cwd: string): Promise<void> {
   await archiveProfilerLogs(cwd, path.join(run.runDir, "observability", label), run.startedAt);
 }
 
+function recordJsonFailure(run: Run, failure: import("./contract.ts").JsonReadFailure): void {
+  run.jsonReadFailures.push({ stage: failure.stage, attempt: failure.attempt, text: maskSecrets(failure.text) });
+}
+
 function finish(run: Run, result: Outcome): WorkflowResult {
   return {
     ...result,
     runId: run.runId,
     runDir: run.runDir,
     integrationPath: run.integration?.path,
+    jsonReadFailures: run.jsonReadFailures,
   };
 }
 

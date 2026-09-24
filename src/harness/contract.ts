@@ -16,16 +16,20 @@ export type Task = {
 export type Plan = {
   assumptions: string[];
   tasks: Task[];
-};
+} | JsonReadFailure;
+
+export type JsonReadFailure = { decision: "json-read-failed"; stage: "clarify" | "plan" | "review"; attempt: number; text: string };
 
 export type Clarification =
   | { decision: "proceed"; assumptions: string[] }
-  | { decision: "return"; questions: string[] };
+  | { decision: "return"; questions: string[] }
+  | JsonReadFailure;
 
 export type Review =
   | { decision: "pass"; concerns: string[] }
   | { decision: "fix"; issues: Task[] }
-  | { decision: "escalate"; reason: string };
+  | { decision: "escalate"; reason: string }
+  | JsonReadFailure;
 
 export type PullRequest = {
   url: string;
