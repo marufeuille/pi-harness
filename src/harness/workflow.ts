@@ -13,13 +13,14 @@ import {
   createRunId,
   currentBranch,
   ensureGitRepo,
-  headSha,
   mergeBranch,
   openIntegrationWorktree,
   openTaskWorktree,
   removeWorktree,
   runDirectory,
   runGit,
+  resolveBase,
+  publishBaseBranch,
   type Worktree,
 } from "./worktrees.ts";
 
@@ -29,6 +30,7 @@ export type WorkflowInput = {
   ticket?: Ticket;
   config: WorkflowConfig;
   steps: Steps;
+  baseRevision?: string;
 };
 
 type Outcome =
@@ -62,7 +64,11 @@ type Run = {
 export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult> {
   const ticket = input.ticket ?? (input.ticketPath ? await loadTicket(input.ticketPath) : undefined);
   if (!ticket) throw new Error("チケット入力がありません");
+  await ensureGitRepo(input.repo);
+  const base = await resolveBase(input.repo, input.baseRevision);
   const run = beginRun(input);
+  run.baseBranch = base.branch;
+  run.baseSha = base.sha;
 
   phase("要件を確認する");
   let clarification;
@@ -77,11 +83,6 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
     return finish(run, { status: "returned", questions: clarification.questions });
   }
 
-  run.baseBranch = await ensureGitRepo(input.repo);
-  if (input.config.phases.pullRequest && run.baseBranch === "HEAD") {
-    throw new Error("プルリクエストを作るには、ブランチにチェックアウトした git リポジトリが必要です");
-  }
-
   phase("プランを作る");
   let plan;
   const planLogs = await profilerLogFiles(input.repo);
@@ -92,8 +93,7 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
     return finish(run, { status: "returned", questions: ["プランの返答から JSON を読み取れませんでした"] });
   }
 
-  run.integration = await openIntegrationWorktree(input.repo, run.runId);
-  run.baseSha = await headSha(run.integration.path);
+  run.integration = await openIntegrationWorktree(input.repo, run.runId, run.baseSha);
 
   const implemented = await implementTasks(run, ticket, plan.tasks);
   if (implemented.status === "escalated") {
@@ -111,6 +111,7 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
   }
 
   phase("プルリクエストを作る");
+  if (input.baseRevision) await publishBaseBranch(input.repo, run.baseBranch, run.baseSha);
   const pullRequest = await input.steps.openPullRequest({
     cwd: run.integration.path,
     title: ticket.title,
