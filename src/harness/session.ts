@@ -79,15 +79,10 @@ export async function runRole(options: {
     settingsManager: SettingsManager.inMemory(),
   });
   await resourceLoader.reload();
-  const model = modelRuntime.getModel(spec.provider, spec.id);
-  if (!model) {
-    throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
-  }
 
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
     agentDir,
-    model,
     thinkingLevel: spec.thinking,
     modelRuntime,
     resourceLoader,
@@ -111,6 +106,13 @@ export async function runRole(options: {
     const observabilityDir = path.join(options.cwd, ".pi-observability");
     const before = new Set(await fs.readdir(observabilityDir).catch(() => [] as string[]));
     await session.bindExtensions({});
+    // Extensions register providers during binding; resolve only after that
+    // registration queue has been applied to the runtime.
+    const model = modelRuntime.getModel(spec.provider, spec.id);
+    if (!model) {
+      throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
+    }
+    await session.setModel(model);
     const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
     const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
     if (!logCreated) {
