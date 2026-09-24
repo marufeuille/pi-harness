@@ -101,6 +101,10 @@ test("updates only state resolved from the issue's own team", async () => {
         ? response(200, { data: { issue: { id: "issue-id", team: { id: "team-id", states: { nodes: [{ id: "wrong", name: "Other" }, { id: `state-${stateName}`, name: stateName }] } } } } })
         : response(200, { data: { issueUpdate: { success: true } } });
     } });
+    const stateQuery = requests[0] as { query: string; variables: Record<string, string> };
+    assert.match(stateQuery.query, /team\s*\{\s*id\s+states\s*\{\s*nodes\s*\{\s*id\s+name\s*\}\s*\}\s*\}/);
+    assert.doesNotMatch(stateQuery.query, /workflowStates/);
+    assert.deepEqual(stateQuery.variables, { id: "ABC-1" });
     const mutation = requests[1] as { query: string; variables: Record<string, string> };
     assert.deepEqual(mutation.variables, { id: "issue-id", stateId: `state-${stateName}` });
     assert.match(mutation.query, /stateId: \$stateId/);

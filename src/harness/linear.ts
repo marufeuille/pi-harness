@@ -100,7 +100,7 @@ export async function updateLinearIssueState(
     }
     return payload.data;
   };
-  const data = await request("query IssueState($id: String!) { issue(id: $id) { id team { id states: workflowStates { nodes { id name } } } } }", { id: issueId });
+  const data = await request("query IssueState($id: String!) { issue(id: $id) { id team { id states { nodes { id name } } } }", { id: issueId });
   const issue = isRecord(data) ? data.issue : undefined;
   if (!issue) throw new Error("Linear state update failed: not_found");
   if (!isRecord(issue) || typeof issue.id !== "string" || !isRecord(issue.team) || !Array.isArray(issue.team.states?.nodes)) throw new Error("Linear state update failed: api");
