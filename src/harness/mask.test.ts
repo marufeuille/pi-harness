@@ -38,6 +38,25 @@ test("masks generic token assignments and Basic authorization in logged text", (
   assert.ok(!maskSecrets('{"GH_TOKEN":"example-sensitive-token"}').includes(sensitive));
 });
 
+test("masks JSON AWS secret keys and curl user credentials in every supported form", () => {
+  const secrets = [
+    "example-sensitive-aws-secret",
+    "hunter2",
+    "hunter2",
+    "my secret password",
+  ];
+  const input = [
+    '{"AWS_SECRET_ACCESS_KEY":"example-sensitive-aws-secret"}',
+    "curl --user alice:hunter2 https://example.com",
+    "curl --user=alice:hunter2 https://example.com",
+    "curl -u 'alice:my secret password' https://example.com",
+  ].join("\\n");
+  const masked = maskSecrets(input);
+  for (const secret of secrets) assert.ok(!masked.includes(secret), `secret remained: ${secret}`);
+  assert.match(masked, /curl --user \\[REDACTED\\]/);
+  assert.match(masked, /curl --user=\\[REDACTED\\]/);
+});
+
 test("masks quoted credentials in malformed JSON-like text", () => {
   const input = '{"api_key":"abc123", "access_token":"token123", "password":"hunter 2 rocks",';
   const masked = maskSecrets(input);
