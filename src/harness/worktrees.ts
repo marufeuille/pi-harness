@@ -57,7 +57,7 @@ export async function resolveBase(repo: string, revision?: string): Promise<{ sh
   try {
     await runGit(repo, ["fetch", "origin", "main"]);
   } catch (error) {
-    throw new Error(`origin/main の取得に失敗しました: ${String(error)}`);
+    throw new Error(`origin/main の取得に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
   const rev = revision ?? "FETCH_HEAD";
   let sha: string;
