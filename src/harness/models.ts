@@ -17,10 +17,14 @@ export type ModelDefinition = { provider: string; id: string; parameters: Record
 // Runtime catalogs may be supplied by the host/provider integration. Registering
 // catalog metadata is intentionally independent from the selectable aliases.
 export function registerRuntimeModel(model: { provider: string; id: string; reasoning?: boolean; contextWindow?: number; maxContextWindow?: number; thinkingLevelMap?: Record<string, unknown>; [key: string]: any }): void {
-  const levels = model.thinkingLevelMap ? Object.keys(model.thinkingLevelMap) : model.reasoning ? ["minimal", "low", "medium", "high"] : [];
   const parameters: Record<string, ParameterRule> = {};
-  if (levels.length) parameters.effort = { values: levels, default: levels.includes("medium") ? "medium" : levels[0] };
+  // Only capabilities explicitly published by the provider catalog are authoritative.
+  if (model.thinkingLevelMap) {
+    const levels = Object.keys(model.thinkingLevelMap);
+    parameters.effort = { values: levels, ...(model.defaultThinkingLevel !== undefined ? { default: model.defaultThinkingLevel } : {}) };
+  }
   if (model.maxContextWindow || model.contextWindow) parameters.contextWindow = { range: [1, model.maxContextWindow ?? model.contextWindow!] , default: model.contextWindow };
+  if (Array.isArray(model.fastValues)) parameters.fast = { values: model.fastValues, ...(model.defaultFast !== undefined ? { default: model.defaultFast } : {}) };
   modelDefinitions[`${model.provider}/${model.id}`] = { provider: model.provider, id: model.id, parameters };
 }
 const effort = (value: string): ParameterRule => ({ values: ["low", "medium", "high", "xhigh"], default: value });
@@ -29,7 +33,7 @@ const definitions: ModelDefinition[] = [
   { provider: "openai-codex", id: "gpt-6-luna", parameters: { effort: effort("medium"), contextWindow: { range: [1, 1000000] } } },
   { provider: "cursor", id: "grok-4.6", parameters: { effort: effort("medium"), fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
   { provider: "cursor", id: "grok-4.7", parameters: { effort: effort("medium"), fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
-  { provider: "xai", id: "grok-4.7", parameters: { effort: { values: ["low", "medium", "high", "xhigh"], default: "medium" }, fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
+  { provider: "xai", id: "grok-4.7", parameters: { effort: { values: ["low", "medium", "high", "xhigh"], default: "medium" }, fast: { values: [true, false], default: true }, contextWindow: { range: [1, 500000] } } },
   { provider: "anthropic", id: "claude-fable-5-1", parameters: { effort: effort("high"), contextWindow: { range: [1, 200000] } } },
 ];
 // Model capability metadata is the provider/runtime catalog snapshot used for offline preflight.
@@ -42,9 +46,7 @@ export function registerModelDefinition(definition: ModelDefinition): void {
 
 export function resolveAndValidateModel(model: ModelSpec, target: string): ModelSpec {
   const definition = modelDefinitions[`${model.provider}/${model.id}`];
-  // Unknown here means the provider/runtime catalog has not been loaded yet;
-  // existence and capabilities are checked against the live model on selection.
-  if (!definition) return model;
+  if (!definition) throw new Error(`${target}: カタログにモデルがありません (${model.provider}/${model.id})`);
   const supplied = model.parameters ?? {};
   for (const key of Object.keys(supplied)) {
     const rule = definition.parameters[key];

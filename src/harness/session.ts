@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { ModelSpec } from "./models.ts";
-import { modelCatalog, registerRuntimeModel } from "./models.ts";
+import { modelCatalog, registerRuntimeModel, resolveAndValidateModel } from "./models.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentDir = path.join(harnessRoot, ".pi-clean");
@@ -156,20 +156,22 @@ export async function runRole(options: {
       throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
     }
     registerRuntimeModel(model as any);
+    const validated = resolveAndValidateModel(spec, `models.${options.role}`);
+    const activeParameters = validated.parameters ?? {};
     // Parameters belong to the active model invocation, not the initial session
     // configuration; apply them after selecting the model so model changes do not
     // reset the requested thinking level.
     await session.setModel({
       ...model,
-      ...(typeof parameters.contextWindow === "number" ? { contextWindow: parameters.contextWindow } : {}),
+      ...(typeof activeParameters.contextWindow === "number" ? { contextWindow: activeParameters.contextWindow } : {}),
     });
     // Reject unsupported levels rather than allowing the session to silently
     // coerce them to a nearby thinking level.
     const supportedThinkingLevels = model.thinkingLevelMap ? Object.keys(model.thinkingLevelMap) : (model as any).reasoning ? ["minimal", "low", "medium", "high"] : ["off"];
-    if (parameters.effort !== undefined && !supportedThinkingLevels.includes(parameters.effort as string)) {
-      throw new Error(`モデルが effort ${String(parameters.effort)} をサポートしていません`);
+    if (activeParameters.effort !== undefined && !supportedThinkingLevels.includes(activeParameters.effort as string)) {
+      throw new Error(`モデルが effort ${String(activeParameters.effort)} をサポートしていません`);
     }
-    if (parameters.effort !== undefined) await session.setThinkingLevel(parameters.effort as any);
+    if (activeParameters.effort !== undefined) await session.setThinkingLevel(activeParameters.effort as any);
     const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
     const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
     if (!logCreated) {
@@ -178,7 +180,7 @@ export async function runRole(options: {
 
     // PromptOptions in SDK 0.87.1 does not forward provider stream options.
     // Wrap the selected model's actual stream boundary instead.
-    const { effort: _effort, contextWindow: _contextWindow, ...streamOptions } = parameters;
+    const { effort: _effort, contextWindow: _contextWindow, ...streamOptions } = activeParameters;
     if (Object.keys(streamOptions).length > 0) applyStreamOptions(model, streamOptions);
     await session.prompt(options.prompt);
     const text = session.getLastAssistantText();
