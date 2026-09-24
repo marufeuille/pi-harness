@@ -67,6 +67,30 @@ export function applyStreamOptions<T extends StreamRuntime>(runtime: T, options:
   return runtime;
 }
 
+/** Cursor encodes fast on the model id (`id:fast` / `id:slow`). Stream options are ignored. */
+export function cursorFastVariantId(modelId: string, fast: boolean): string {
+  const baseId = modelId.replace(/:(?:fast|slow)$/, "");
+  return `${baseId}:${fast ? "fast" : "slow"}`;
+}
+
+export function cursorPublishesFast(modelId: string, provider: string, lookup: (provider: string, id: string) => unknown): boolean {
+  if (provider !== "cursor") return false;
+  if (modelId.endsWith(":fast") || modelId.endsWith(":slow")) return true;
+  const baseId = modelId.replace(/:(?:fast|slow)$/, "");
+  return Boolean(lookup(provider, `${baseId}:fast`) || lookup(provider, `${baseId}:slow`));
+}
+
+export function modelForFastParameter<T extends { provider: string; id: string }>(
+  model: T,
+  fast: unknown,
+  lookup: (provider: string, id: string) => T | undefined,
+): T {
+  if (model.provider !== "cursor" || typeof fast !== "boolean") return model;
+  const variant = lookup(model.provider, cursorFastVariantId(model.id, fast));
+  if (!variant) throw new Error(`モデルが fast ${String(fast)} をサポートしていません`);
+  return variant;
+}
+
 export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }> }> ; index: number };
 
 export async function runRole(options: {
@@ -156,13 +180,16 @@ export async function runRole(options: {
     await session.bindExtensions({});
     // Extensions register providers during binding; resolve only after that
     // registration queue has been applied to the runtime.
-    const model = modelRuntime.getModel(spec.provider, spec.id);
-    if (!model) {
+    const found = modelRuntime.getModel(spec.provider, spec.id);
+    if (!found) {
       throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
     }
-    registerRuntimeModel(model as any);
+    const lookup = (provider: string, id: string) => modelRuntime.getModel(provider, id);
+    const supportsFast = cursorPublishesFast(found.id, found.provider, lookup);
+    registerRuntimeModel({ ...found, ...(supportsFast ? { supportsFast: true } : {}) } as any);
     const validated = resolveAndValidateModel(spec, `models.${options.role}`);
     const activeParameters = validated.parameters ?? {};
+    const model = modelForFastParameter(found, activeParameters.fast, lookup);
     // Parameters belong to the active model invocation, not the initial session
     // configuration; apply them after selecting the model so model changes do not
     // reset the requested thinking level.
