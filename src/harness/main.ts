@@ -16,6 +16,11 @@ const linearId = readArg("--linear");
 const repo = path.resolve(readArg("--repo") ?? process.cwd());
 const configPath = path.resolve(readArg("--config") ?? path.join(harnessRoot, "config", "harness.json"));
 
+if (process.env.HARNESS_E2E_FIXTURE && linearId) {
+  process.stderr.write("固定応答実行では Linear 入力を利用できません\n");
+  process.exit(1);
+}
+
 if (Boolean(ticketPath) === Boolean(linearId)) {
   process.stderr.write("--ticket または --linear のどちらか一方を指定してください\n");
   process.exit(1);
@@ -34,7 +39,6 @@ if (linearId) {
 const config = await loadConfig(configPath);
 let fixture: OfflineFixture | undefined;
 if (process.env.HARNESS_E2E_FIXTURE) {
-  if (linearId) throw new Error("固定応答実行では Linear 入力を利用できません");
   if (config.phases.pullRequest || config.phases.requireCi || config.phases.merge || config.phases.productionCheck) {
     throw new Error("固定応答実行では外部フェーズを有効にできません");
   }
