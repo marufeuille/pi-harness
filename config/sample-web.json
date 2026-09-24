@@ -1,7 +1,7 @@
 {
   "models": {
-    "smart": "astra",
-    "cheap": "luna"
+    "smart": { "provider": "openai-codex", "id": "gpt-6-astra", "parameters": { "effort": "high" } },
+    "cheap": { "provider": "openai-codex", "id": "gpt-6-luna", "parameters": { "effort": "medium" } }
   },
   "phases": {
     "pullRequest": false,

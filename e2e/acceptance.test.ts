@@ -40,7 +40,7 @@ test("harness accepts clear and ambiguous tickets offline", async () => {
       const config = path.join(temp, `${name}-config.json`);
       await writeFile(ticket, ticketText);
       await writeFile(fixture, JSON.stringify({ calls }));
-      await writeFile(config, JSON.stringify({ models: { smart: "astra", cheap: "grok" }, phases: { pullRequest: false, requireCi: false, merge: false, productionCheck: false }, review: { maxLoops: 3 }, checks: [] }));
+      await writeFile(config, JSON.stringify({ models: { smart: { provider: "openai-codex", id: "gpt-6-astra", parameters: { effort: "high" } }, cheap: { provider: "cursor", id: "grok-4.6", parameters: { effort: "medium" } } }, phases: { pullRequest: false, requireCi: false, merge: false, productionCheck: false }, review: { maxLoops: 3 }, checks: [] }));
       return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
       const child = spawn("npm", ["run", "harness", "--", "--ticket", ticket, "--repo", repo, "--config", config], {
         cwd: root, env: { ...process.env, HARNESS_E2E_FIXTURE: path.resolve(fixture), API_KEY: "", OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", CURSOR_API_KEY: "", LINEAR_API_KEY: "", GH_TOKEN: "", GITHUB_TOKEN: "" }, stdio: ["ignore", "pipe", "pipe"],
