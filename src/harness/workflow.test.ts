@@ -13,7 +13,10 @@ import { runWorkflow } from "./workflow.ts";
 const execFileAsync = promisify(execFile);
 
 const config: WorkflowConfig = {
-  models: { smart: "astra", cheap: "grok" },
+  models: {
+    smart: { provider: "openai-codex", id: "gpt-6-astra", parameters: { effort: "high" } },
+    cheap: { provider: "cursor", id: "grok-4.6", parameters: { effort: "medium" } },
+  },
   phases: {
     pullRequest: false,
     requireCi: false,

@@ -17,13 +17,26 @@ LINEAR_API_KEY='your-linear-api-key' npm run harness -- --linear https://linear.
 
 ## E2E テスト
 
-`npm run test:e2e` は単体テストと独立して実行します。テスト自身が Markdown チケット、固定応答 JSON、専用の外部フェーズ無効設定、および一時 git リポジトリを作り、`npm run harness` と同じ入口を子プロセスで起動します。API キー不要でモデル API・Linear・GitHub へ接続せず、明確なチケットの実装取り込みと `ready`、曖昧なチケットの質問と `returned`、未実装を検証します。一時データは終了時に削除され、子プロセスには120秒の上限があります。`npm test` には含まれません。
+`npm run test:e2e` は単体テストと独立して実行します。テスト自身が Markdown チケット、固定応答 JSON、専用の外部フェーズ無効設定、および一時 git リポジトリを作り、`npm run harness` と同じ入口を子プロセスで起動します。API キー不要でモデル API・Linear・GitHub へ接続せず、明確なチケットの実装取り込みと `ready`、曖昧なチケットの質問と `returned`、未実装を検証します。固定応答による受け入れテストであり、プロバイダへの実際のパラメータ送信は検証しません。一時データは終了時に削除され、子プロセスには120秒の上限があります。`npm test` には含まれません。
 
-## Cursor Grok
+## モデル設定
 
-`grok` は `pi-cursor-sdk` の Cursor プロバイダ経由で `grok-4.6` を使います。認証には `CURSOR_API_KEY` 環境変数、または Pi の認証保存先である `.pi-clean` に保存した Cursor API キーを使ってください。キーをリポジトリに置かないでください。Cursor デスクトップや Cursor エージェント CLI へのログイン、xAI の API キーは不要です。
+`models.smart` と `models.cheap` には別名ではなく `{ "provider": "...", "id": "...", "parameters": { ... } }` を指定します。バージョンはモデル ID で選びます。たとえば `grok-4.7` を xhigh で fast を無効にする指定は次の通りです。
 
-設定の `models.cursorGrokId` で `grok-4.6` のような任意の非空文字列 ID を指定できます。省略時は `grok-4.6` を使います。grok に割り当てた段階ではこの設定値を使います。設定解析時には空でない文字列であることのみ検証し、ID の実在確認は行いません。利用可能な ID は実行時に Cursor が返す一覧に限られ、一覧外の ID はプロンプト送信前に失敗します。
+```json
+{ "provider": "xai", "id": "grok-4.7", "parameters": { "effort": "xhigh", "fast": false } }
+```
+
+`parameters` には `effort`（例: `low` / `medium` / `high` / `xhigh`）、`fast`、`contextWindow` と、モデル実行に必要な追加パラメータを指定できます。項目を省略すると、そのモデルのカタログ既定値が使われます。未知のモデル ID、非対応の effort / fast、範囲外のコンテキストウィンドウは実行前に理由を示して停止します。
+
+| 既存別名 | provider | id | effort |
+|---|---|---|---|
+| astra | openai-codex | gpt-6-astra | high |
+| luna | openai-codex | gpt-6-luna | medium |
+| grok | cursor | grok-4.6 | medium |
+| fable | anthropic | claude-fable-5-1 | high |
+
+Cursor の Grok は `pi-cursor-sdk` 経由です。`CURSOR_API_KEY` または Pi の `.pi-clean` に保存した Cursor API キーを使い、キーをリポジトリに置かないでください。Cursor デスクトップやエージェント CLI へのログイン、xAI API キーは不要です。利用可能な ID は Cursor が返す一覧に限られ、一覧外の ID はプロンプト送信前に失敗します。
 
 ## セッションログ
 
