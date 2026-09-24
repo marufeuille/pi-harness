@@ -10,6 +10,17 @@ import { execFile } from "node:child_process";
 const exec = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "..");
 
+test("harness rejects missing and repeated base revisions", async () => {
+  for (const args of [["--base"], ["--base", "HEAD", "--base", "main"]]) {
+    const result = await exec("npm", ["run", "harness", "--", "--ticket", "ticket.md", ...args], { cwd: root }).then(
+      () => ({ code: 0, stderr: "" }),
+      (error: { code?: number; stderr?: string }) => ({ code: error.code ?? 1, stderr: error.stderr ?? "" }),
+    );
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /--base/);
+  }
+});
+
 test("harness accepts clear and ambiguous tickets offline", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "harness-e2e-"));
   try {
