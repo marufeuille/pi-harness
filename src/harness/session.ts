@@ -88,6 +88,18 @@ export async function runRole(options: {
   });
   const priorRole = process.env.PI_HARNESS_ROLE;
   const priorCwd = process.env.PI_HARNESS_CWD;
+  const priorCursorApiKey = process.env.CURSOR_API_KEY;
+  // pi-cursor-sdk's initial model discovery reads the default stored credential,
+  // independently of ModelRuntime's authPath. Bridge the harness credential
+  // through the SDK's supported environment key while loading extensions.
+  if (!process.env.CURSOR_API_KEY) {
+    try {
+      const auth = JSON.parse(await fs.readFile(path.join(agentDir, "auth.json"), "utf8")) as Record<string, any>;
+      if (auth.cursor?.type === "api_key" && typeof auth.cursor.key === "string") {
+        process.env.CURSOR_API_KEY = auth.cursor.key;
+      }
+    } catch { /* no saved cursor credential */ }
+  }
   process.env.PI_HARNESS_ROLE = options.tools.includes("write") ? "edit" : "read";
   process.env.PI_HARNESS_CWD = options.cwd;
   const resourceLoader = new DefaultResourceLoader({
@@ -107,6 +119,7 @@ export async function runRole(options: {
   } finally {
     if (priorRole === undefined) delete process.env.PI_HARNESS_ROLE; else process.env.PI_HARNESS_ROLE = priorRole;
     if (priorCwd === undefined) delete process.env.PI_HARNESS_CWD; else process.env.PI_HARNESS_CWD = priorCwd;
+    if (priorCursorApiKey === undefined) delete process.env.CURSOR_API_KEY; else process.env.CURSOR_API_KEY = priorCursorApiKey;
   }
 
   const { session, extensionsResult } = await createAgentSession({
