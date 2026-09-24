@@ -14,7 +14,7 @@ const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const ticketPath = readArg("--ticket");
 const linearId = readArg("--linear");
 const baseRevision = readArg("--base");
-if (process.argv.includes("--base") && (!baseRevision || baseRevision.startsWith("--"))) {
+if (process.argv.filter((arg) => arg === "--base").length > 1 || (process.argv.includes("--base") && (!baseRevision || baseRevision.startsWith("--")))) {
   process.stderr.write("--base には空でないリビジョンを指定してください\n");
   process.exit(1);
 }
