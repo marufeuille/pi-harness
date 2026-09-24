@@ -80,6 +80,7 @@ export async function runRole(options: {
     return call.text;
   }
   const spec = options.model;
+  const parameters = spec.parameters ?? {};
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsStorePath: path.join(agentDir, "models-store.json"),
@@ -118,7 +119,7 @@ export async function runRole(options: {
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
     agentDir,
-    thinkingLevel: (spec.parameters?.effort ?? "medium") as any,
+    thinkingLevel: (parameters.effort ?? "medium") as any,
     modelRuntime,
     resourceLoader,
     tools: options.tools,
@@ -147,14 +148,21 @@ export async function runRole(options: {
     if (!model) {
       throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
     }
-    await session.setModel(model);
+    // Parameters belong to the active model invocation, not the initial session
+    // configuration; apply them after selecting the model so model changes do not
+    // reset the requested thinking level.
+    await session.setModel({
+      ...model,
+      ...(typeof parameters.contextWindow === "number" ? { contextWindow: parameters.contextWindow } : {}),
+    });
+    await session.setThinkingLevel((parameters.effort ?? "medium") as any);
     const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
     const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
     if (!logCreated) {
       throw new Error("profiler のログファイルを作成できませんでした");
     }
 
-    await session.prompt(options.prompt);
+    await session.prompt(options.prompt, { ...parameters } as any);
     const text = session.getLastAssistantText();
     if (!text) {
       throw new Error("モデルがテキストを返しませんでした");
