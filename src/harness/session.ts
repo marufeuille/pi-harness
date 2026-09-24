@@ -18,7 +18,7 @@ const agentDir = path.join(harnessRoot, ".pi-clean");
 const profilerPath = path.join(harnessRoot, "extensions", "profiler.ts");
 
 const readOnlyTools = ["read", "grep", "find", "ls"];
-const editTools = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const editTools = ["read", "edit", "write", "grep", "find", "ls"];
 
 export function toolsFor(role: "read" | "edit"): string[] {
   return role === "edit" ? editTools : readOnlyTools;
