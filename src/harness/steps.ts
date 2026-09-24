@@ -2,6 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { WorkflowConfig } from "./config.ts";
+import { resolveAndValidateModel } from "./models.ts";
 import {
   parseClarification,
   parseJsonBlock,
@@ -20,8 +21,8 @@ import { maskSecrets } from "./mask.ts";
 const execFileAsync = promisify(execFile);
 
 export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixture): Steps {
-  const smart = config.models.smart;
-  const cheap = config.models.cheap;
+  const smart = resolveAndValidateModel(config.models.smart, "models.smart");
+  const cheap = resolveAndValidateModel(config.models.cheap, "models.cheap");
 
   return {
     async clarify({ ticket, cwd }) {
