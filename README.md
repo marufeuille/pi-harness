@@ -6,9 +6,14 @@ Markdown チケットまたは Linear 課題を入力し、Pi のセッション
 npm test
 npm run test:e2e
 npm run harness -- --ticket fixtures/sample-ticket.md --repo /path/to/git/app
+npm run harness -- --ticket fixtures/sample-ticket.md --repo /path/to/git/app --base abc1234
 LINEAR_API_KEY='your-linear-api-key' npm run harness -- --linear ABC-123 --repo /path/to/git/app
 LINEAR_API_KEY='your-linear-api-key' npm run harness -- --linear https://linear.app/acme/issue/ABC-123/example --repo /path/to/git/app
 ```
+
+## 作業の起点
+
+起点を省略すると、実行開始前に `origin/main` を取得し、その先端を固定起点として作業します（チェックアウト中のブランチやローカル `main` ではありません）。Markdown (`--ticket`) と Linear (`--linear`) のどちらでも `--base <revision>` を指定でき、SHA またはタグの例は `--base abc1234`、`--base v1.2.3` です。指定時はそのリビジョンを起点とし、PR のベースにはその起点を指す専用ブランチを使います。値が空の場合や取得・リビジョン解決に失敗した場合は理由を表示して停止し、ワークフローを開始しません。
 
 ## E2E テスト
 
