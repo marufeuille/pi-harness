@@ -4,22 +4,34 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.ts";
 import { createDefaultSteps } from "./steps.ts";
 import { runWorkflow } from "./workflow.ts";
+import { loadLinearTicket } from "./ticket.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 const ticketPath = readArg("--ticket");
+const linearId = readArg("--linear");
 const repo = path.resolve(readArg("--repo") ?? process.cwd());
 const configPath = path.resolve(readArg("--config") ?? path.join(harnessRoot, "config", "harness.json"));
 
-if (!ticketPath) {
-  process.stderr.write("使い方: tsx src/harness/main.ts --ticket fixtures/sample-ticket.md --repo <gitリポジトリ>\n");
+if (Boolean(ticketPath) === Boolean(linearId)) {
+  process.stderr.write("--ticket または --linear のどちらか一方を指定してください\n");
   process.exit(1);
+}
+
+let ticket;
+if (linearId) {
+  try {
+    ticket = await loadLinearTicket(linearId);
+  } catch (error) {
+    process.stderr.write(`Linear の課題を利用できません: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
 }
 
 const config = await loadConfig(configPath);
 const result = await runWorkflow({
   repo,
-  ticketPath: path.resolve(ticketPath),
+  ...(ticket ? { ticket } : { ticketPath: path.resolve(ticketPath!) }),
   config,
   steps: createDefaultSteps(config),
 });
