@@ -24,6 +24,7 @@ export type StopSnapshot = {
   branch: string;
   worktree: string;
   recommendation: string;
+  conflicts?: string[];
 };
 
 export type ResumeActionName = "extraRounds" | "hint" | "replanRemaining" | "answers" | "continueFromIngest";
@@ -136,10 +137,16 @@ export function makeStopSnapshot(input: {
   trend: LoopTrend;
   branch: string;
   worktree: string;
+  conflicts?: string[];
 }): StopSnapshot {
   return {
-    ...input,
+    kind: input.kind,
+    lastOutput: input.lastOutput,
+    trend: input.trend,
+    branch: input.branch,
+    worktree: input.worktree,
     recommendation: recommendationFor(input.kind),
+    ...(input.kind === "conflict" ? { conflicts: input.conflicts ?? [] } : {}),
   };
 }
 

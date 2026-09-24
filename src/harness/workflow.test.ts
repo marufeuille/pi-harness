@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 
 import type { WorkflowConfig } from "./config.ts";
 import type { Steps } from "./contract.ts";
+import { loadLoopState } from "./loop-state.ts";
 import { runWorkflow } from "./workflow.ts";
 
 const execFileAsync = promisify(execFile);
@@ -208,6 +209,10 @@ test("同じファイルを触る並列タスクは衝突として人に返す",
       assert.match(result.stop.recommendation, /取り込み/);
       assert.ok(result.resumeState);
       assert.ok(result.resumeState.remainingTasks.length > 0);
+      assert.deepEqual(result.stop.conflicts, ["shared.txt"]);
+      assert.ok(result.resumeState.completedTaskIds.includes("left"));
+      assert.equal(result.resumeState.completedTaskIds.includes("right"), false);
+      assert.equal(await readFile(path.join(result.runDir, "tasks", "right", "shared.txt"), "utf8"), "right");
     }
   } finally {
     await rm(repo, { recursive: true, force: true });
@@ -320,9 +325,11 @@ test("PR 以降は設定がオンのときだけ、その順で呼ぶ", async ()
         implement: async ({ worktree }) => {
           await writeFile(path.join(worktree.path, "feature.txt"), "ok");
         },
-        review: async () => ({ decision: "pass", concerns: [] }),
-        openPullRequest: async () => {
+        review: async () => ({ decision: "pass", concerns: ["ログの文言は後でよい"] }),
+        openPullRequest: async (args) => {
           called.push("pr");
+          assert.deepEqual(args.concerns, ["ログの文言は後でよい"]);
+          assert.deepEqual(args.assumptions, ["推測A"]);
           return { url: "https://example.com/pull/7", number: 7 };
         },
         waitForChecks: async () => {
@@ -339,6 +346,9 @@ test("PR 以降は設定がオンのときだけ、その順で呼ぶ", async ()
     });
     assert.deepEqual(called, ["pr", "ci", "merge", "production"]);
     assert.equal(result.status, "production-ok");
+    if (result.status === "production-ok") {
+      assert.deepEqual(result.concerns, ["ログの文言は後でよい"]);
+    }
   } finally {
     await rm(repo, { recursive: true, force: true });
   }
@@ -417,6 +427,7 @@ test("減っている致命的な残件は上限で止まり、追加回数で�
     assert.equal(first.resumeState.originalMaxLoops, 2);
     assert.deepEqual(implemented, ["feature", "fix-a", "fix-b"]);
     const cfg = { ...config, review: { maxLoops: 2 } };
+    const stored = await loadLoopState(first.runDir);
     const resumed = await runWorkflow({
       repo,
       ticketPath: await writeTicket(),
@@ -435,7 +446,7 @@ test("減っている致命的な残件は上限で止まり、追加回数で�
         },
         review: async () => ({ decision: "pass", concerns: ["文言"] }),
       }),
-      resume: { state: first.resumeState, extraRounds: 1 },
+      resume: { state: stored, extraRounds: 1 },
     });
     assert.equal(cfg.review.maxLoops, 2);
     assert.equal(clarifies, 1);
@@ -809,6 +820,177 @@ test("変化したチェック失敗でも要求を満たしていれば懸念�
     if (result.status === "ready") {
       assert.ok(result.concerns.includes("フレークしうる"));
     }
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("衝突の再開は未解消なら再停止し、解消済みなら取り込み以降をやり直さない", async () => {
+  const repo = await initRepo();
+  try {
+    const first = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: ["衝突しても残す"] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [
+            { id: "left", title: "left", dependsOn: [], instructions: "left" },
+            { id: "right", title: "right", dependsOn: [], instructions: "right" },
+          ],
+        }),
+        implement: async ({ task, worktree }) => {
+          await writeFile(path.join(worktree.path, "shared.txt"), task.id);
+        },
+        review: async () => {
+          throw new Error("衝突したら検品まで進まない");
+        },
+      }),
+    });
+    if (first.status !== "escalated") throw new Error("expected stop");
+    const blocked = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        implement: async () => {
+          throw new Error("未解消の再開で実装し直さない");
+        },
+        review: async () => {
+          throw new Error("未解消なら検品しない");
+        },
+      }),
+      resume: { state: await loadLoopState(first.runDir), continueFromIngest: true },
+    });
+    assert.equal(blocked.status, "escalated");
+    if (blocked.status !== "escalated") throw new Error("expected stop");
+    assert.equal(blocked.stop.kind, "conflict");
+    assert.deepEqual(blocked.stop.conflicts, ["shared.txt"]);
+    assert.equal(blocked.integrationPath, first.integrationPath);
+    assert.equal(blocked.stop.branch, first.stop.branch);
+    assert.equal(blocked.runId, first.runId);
+
+    await writeFile(path.join(first.integrationPath!, "shared.txt"), "resolved\n");
+    await git(first.integrationPath!, ["add", "shared.txt"]);
+    const implemented: string[] = [];
+    const resumed = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+          throw new Error(`完了済みまたは未取り込み成果を実装し直した: ${task.id}`);
+        },
+        review: async ({ plan }) => {
+          assert.ok("assumptions" in plan && plan.assumptions.includes("衝突しても残す"));
+          return { decision: "pass", concerns: [] };
+        },
+      }),
+      resume: { state: await loadLoopState(first.runDir), continueFromIngest: true },
+    });
+    assert.equal(resumed.status, "ready");
+    assert.deepEqual(implemented, []);
+    assert.equal(resumed.integrationPath, first.integrationPath);
+    assert.equal(resumed.runId, first.runId);
+    assert.equal(await readFile(path.join(resumed.integrationPath!, "shared.txt"), "utf8"), "resolved\n");
+    const branches = await git(repo, ["branch"]);
+    assert.equal([...branches.matchAll(/integration/g)].length, 1);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("ブランチ逸脱の再開は戻してから取り込み、環境失敗はチェック種別を優先する", async () => {
+  const repo = await initRepo();
+  try {
+    const drifted = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ worktree }) => {
+          await writeFile(path.join(worktree.path, "feature.txt"), "ok\n");
+          await execFileAsync("git", ["checkout", "-b", "drift"], { cwd: worktree.path });
+        },
+        review: async () => {
+          throw new Error("逸脱したら検品まで進まない");
+        },
+      }),
+    });
+    if (drifted.status !== "escalated") throw new Error("expected stop");
+    const stillDrifted = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        implement: async () => {
+          throw new Error("逸脱の再開で実装し直さない");
+        },
+        review: async () => {
+          throw new Error("未解消なら検品しない");
+        },
+      }),
+      resume: { state: drifted.resumeState, continueFromIngest: true },
+    });
+    assert.equal(stillDrifted.status, "escalated");
+    if (stillDrifted.status === "escalated") {
+      assert.equal(stillDrifted.stop.kind, "branch-deviation");
+      assert.equal(stillDrifted.integrationPath, drifted.integrationPath);
+    }
+    await git(path.join(drifted.runDir, "tasks", "feature"), ["checkout", `harness/${drifted.runId}/task/feature`]);
+    const restored = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        implement: async () => {
+          throw new Error("戻したあとも実装し直さない");
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+      resume: { state: await loadLoopState(drifted.runDir), continueFromIngest: true },
+    });
+    assert.equal(restored.status, "ready");
+    assert.equal(restored.integrationPath, drifted.integrationPath);
+    assert.equal(await readFile(path.join(restored.integrationPath!, "feature.txt"), "utf8"), "ok\n");
+
+    const implemented: string[] = [];
+    const env = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: {
+        ...config,
+        review: { maxLoops: 3 },
+        checks: ["printf '%s\\n' 'TAP version 13' 'not ok 1 unauthorized response' 'AssertionError: expected unauthorized'; exit 1"],
+      },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => {
+          throw new Error("テスト不合格を環境失敗にしない");
+        },
+      }),
+    });
+    assert.equal(env.status, "escalated");
+    if (env.status === "escalated") {
+      assert.equal(env.stop.kind, "stalled");
+      assert.notEqual(env.stop.kind, "environment-check");
+    }
+    assert.equal(implemented.filter((id) => id.startsWith("checks-")).length, 1);
   } finally {
     await rm(repo, { recursive: true, force: true });
   }

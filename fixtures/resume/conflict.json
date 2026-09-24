@@ -1,0 +1,15 @@
+{
+  "first": {
+    "calls": [
+      { "stage": "clarify", "text": "{\"decision\":\"proceed\",\"assumptions\":[]}" },
+      { "stage": "plan", "text": "{\"assumptions\":[],\"tasks\":[{\"id\":\"left\",\"title\":\"left\",\"instructions\":\"left\",\"dependsOn\":[]},{\"id\":\"right\",\"title\":\"right\",\"instructions\":\"right\",\"dependsOn\":[]}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "shared.txt", "content": "left\n" }] },
+      { "stage": "implement", "text": "", "writes": [{ "path": "shared.txt", "content": "right\n" }] }
+    ]
+  },
+  "resume": {
+    "calls": [
+      { "stage": "review", "text": "{\"decision\":\"pass\",\"concerns\":[]}" }
+    ]
+  }
+}

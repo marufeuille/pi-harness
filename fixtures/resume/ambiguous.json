@@ -1,0 +1,7 @@
+{
+  "first": {
+    "calls": [
+      { "stage": "clarify", "text": "{\"decision\":\"return\",\"questions\":[\"何をどのように変更しますか？\"]}" }
+    ]
+  }
+}

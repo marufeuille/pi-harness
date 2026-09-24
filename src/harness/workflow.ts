@@ -1,7 +1,7 @@
 import { access } from "node:fs/promises";
 import path from "node:path";
 
-import { runChecks } from "./checks.ts";
+import { isEnvironmentFailure, runChecks } from "./checks.ts";
 import type { WorkflowConfig } from "./config.ts";
 import type { Plan, PullRequest, Steps, Task, Ticket } from "./contract.ts";
 import {
@@ -21,7 +21,6 @@ import {
   classifyCheckTrend,
   classifyIssueTrend,
   formatIssues,
-  isEnvironmentCheckFailure,
   kindForIssueLimit,
   makeStopSnapshot,
   type LoopRound,
@@ -36,9 +35,10 @@ import { loadTicket } from "./ticket.ts";
 import {
   commitsAhead,
   commitAll,
+  continueMerge,
   createRunId,
-  currentBranch,
   ensureGitRepo,
+  inspectPendingMerge,
   mergeBranch,
   openIntegrationWorktree,
   openTaskWorktree,
@@ -47,6 +47,9 @@ import {
   runGit,
   resolveBase,
   publishBaseBranch,
+  taskIdFromBranch,
+  taskWorktree,
+  verifyWorktreeBranch,
   type Worktree,
 } from "./worktrees.ts";
 
@@ -159,7 +162,7 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
 
   const implemented = await implementTasks(run, ticket, plan.tasks);
   if (implemented.status === "stopped") {
-    return finish(run, stoppedOutcome(run, implemented.kind, implemented.lastOutput, "same"));
+    return finish(run, stoppedOutcome(run, implemented.kind, implemented.lastOutput, "same", implemented.conflicts));
   }
 
   return afterImplementation(run, ticket, plan);
@@ -211,13 +214,26 @@ async function continueFromState(input: WorkflowInput, ticket: Ticket): Promise<
     run.remaining = plan.tasks;
   }
 
-  const pending = action.continueFromIngest
-    ? readyTasks(run.remainingTasks, new Set(run.completedTaskIds))
-    : run.remaining;
+  if ("continueFromIngest" in action) {
+    if (resume.state.stopKind === "environment-check") {
+      const plan = run.plan;
+      if (!plan) throw new Error("再開するプランがありません");
+      return afterImplementation(run, ticket, plan);
+    }
+    const ingested = await resumeFromIngest(run, ticket);
+    if (ingested.status === "stopped") {
+      return finish(run, stoppedOutcome(run, ingested.kind, ingested.lastOutput, "same", ingested.conflicts));
+    }
+    const plan = run.plan;
+    if (!plan) throw new Error("再開するプランがありません");
+    return afterImplementation(run, ticket, plan);
+  }
+
+  const pending = run.remaining;
   if (pending.length > 0) {
     const implemented = await implementTasks(run, ticket, pending);
     if (implemented.status === "stopped") {
-      return finish(run, stoppedOutcome(run, implemented.kind, implemented.lastOutput, "same"));
+      return finish(run, stoppedOutcome(run, implemented.kind, implemented.lastOutput, "same", implemented.conflicts));
     }
     run.remaining = [];
   }
@@ -282,11 +298,48 @@ async function afterImplementation(run: Run, ticket: Ticket, plan: TaskPlan): Pr
   });
 }
 
+type ImplementStop = {
+  status: "stopped";
+  kind: "conflict" | "branch-deviation";
+  lastOutput: string;
+  conflicts?: string[];
+};
+
+async function resumeFromIngest(run: Run, ticket: Ticket): Promise<{ status: "implemented" } | ImplementStop> {
+  const pending = await inspectPendingMerge(integration(run));
+  if (pending.pending) {
+    const continued = await continueMerge(integration(run));
+    if (!continued.ok) {
+      return {
+        status: "stopped",
+        kind: "conflict",
+        lastOutput: continued.reason,
+        conflicts: continued.conflicts,
+      };
+    }
+    const taskId = taskIdFromBranch(run.runId, pending.sourceBranch);
+    if (taskId) {
+      markIngested(run, taskId);
+      const existing = taskWorktree(run.repo, run.runId, taskId);
+      try {
+        await access(existing.path);
+        await removeTask(run, existing);
+      } catch {
+        // 人が作業ツリーを片付けている場合はそのまま続ける
+      }
+    }
+  }
+
+  const planTasks = run.plan?.tasks ?? [];
+  const extras = run.remainingTasks.filter((task) => !planTasks.some((item) => item.id === task.id));
+  return implementTasks(run, ticket, [...planTasks, ...extras]);
+}
+
 async function implementTasks(
   run: Run,
   ticket: Ticket,
   tasks: Task[],
-): Promise<{ status: "implemented" } | { status: "stopped"; kind: "conflict" | "branch-deviation"; lastOutput: string }> {
+): Promise<{ status: "implemented" } | ImplementStop> {
   const pending = readyTasks(tasks, new Set(run.completedTaskIds));
   if (pending.length === 0) {
     return { status: "implemented" };
@@ -297,24 +350,23 @@ async function implementTasks(
 
   for (const [index, wave] of waves.entries()) {
     phase(`実装する ${index + 1}/${waves.length}: ${wave.map((task) => task.id).join(", ")}`);
-    const prepared: Array<{ task: Task; worktree: Worktree }> = [];
+    const prepared: Array<{ task: Task; worktree: Worktree; skipImplement: boolean }> = [];
     for (const task of wave) {
-      prepared.push({
-        task,
-        worktree: await openTaskWorktree(run.repo, run.runId, task.id, integration(run).branch),
-      });
+      prepared.push(await prepareTaskWorktree(run, task));
     }
 
     const outcomes = await Promise.all(
-      prepared.map(async ({ task, worktree }) => {
-        const logsBefore = await profilerLogFiles(worktree.path);
-        await run.steps.implement({ task, worktree, ticket });
-        await keepLogs(run, task.id, worktree.path, logsBefore);
-        const branch = await currentBranch(worktree.path);
-        if (branch !== worktree.branch) {
+      prepared.map(async ({ task, worktree, skipImplement }) => {
+        if (!skipImplement) {
+          const logsBefore = await profilerLogFiles(worktree.path);
+          await run.steps.implement({ task, worktree, ticket });
+          await keepLogs(run, task.id, worktree.path, logsBefore);
+        }
+        const verified = await verifyWorktreeBranch(worktree);
+        if (!verified.ok) {
           return {
             ok: false as const,
-            reason: `${task.id} の作業ツリーがブランチ ${worktree.branch} から外れました`,
+            reason: `${task.id} の${verified.reason}`,
           };
         }
         await commitAll(worktree.path, `harness: ${task.id} ${task.title}`);
@@ -332,10 +384,7 @@ async function implementTasks(
       if (ahead === 0) {
         await removeTask(run, outcome.worktree);
         mergedIds.add(outcome.task.id);
-        if (isPlanTask(run, outcome.task.id)) {
-          run.completedTaskIds.push(outcome.task.id);
-          run.ingestPosition = run.completedTaskIds.length;
-        }
+        markIngested(run, outcome.task.id);
         continue;
       }
       const merged = await mergeBranch(integration(run), outcome.worktree.branch);
@@ -346,18 +395,42 @@ async function implementTasks(
           status: "stopped",
           kind: "conflict",
           lastOutput: `${outcome.task.id} の取り込みで衝突しました\n${merged.reason}`,
+          conflicts: merged.conflicts,
         };
       }
       await removeTask(run, outcome.worktree);
       mergedIds.add(outcome.task.id);
-      if (isPlanTask(run, outcome.task.id)) {
-        run.completedTaskIds.push(outcome.task.id);
-        run.ingestPosition = run.completedTaskIds.length;
-      }
+      markIngested(run, outcome.task.id);
     }
   }
 
   return { status: "implemented" };
+}
+
+async function prepareTaskWorktree(
+  run: Run,
+  task: Task,
+): Promise<{ task: Task; worktree: Worktree; skipImplement: boolean }> {
+  const existing = taskWorktree(run.repo, run.runId, task.id);
+  try {
+    await access(existing.path);
+    return { task, worktree: existing, skipImplement: true };
+  } catch {
+    return {
+      task,
+      worktree: await openTaskWorktree(run.repo, run.runId, task.id, integration(run).branch),
+      skipImplement: false,
+    };
+  }
+}
+
+function markIngested(run: Run, taskId: string): void {
+  if (isPlanTask(run, taskId) && !run.completedTaskIds.includes(taskId)) {
+    run.completedTaskIds.push(taskId);
+    run.ingestPosition = run.completedTaskIds.length;
+  }
+  run.remainingTasks = run.remainingTasks.filter((task) => task.id !== taskId);
+  run.remaining = run.remaining.filter((task) => task.id !== taskId);
 }
 
 async function reviewUntilAcceptable(
@@ -375,7 +448,7 @@ async function reviewUntilAcceptable(
       phase(`チェックが失敗した ${displayAttempt}/${cap}`);
       run.history.push({ attempt: displayAttempt, checkOutput: checks.output });
       run.remaining = [checkFixTask(displayAttempt, checks.output)];
-      if (isEnvironmentCheckFailure(checks.output)) {
+      if (isEnvironmentFailure(checks)) {
         return { status: "stop", outcome: stoppedOutcome(run, "environment-check", checks.output, "same") };
       }
       const checkTrend = classifyCheckTrend(run.history);
@@ -387,7 +460,7 @@ async function reviewUntilAcceptable(
       }
       const fixed = await implementTasks(run, ticket, run.remaining);
       if (fixed.status === "stopped") {
-        return { status: "stop", outcome: stoppedOutcome(run, fixed.kind, fixed.lastOutput, "same") };
+        return { status: "stop", outcome: stoppedOutcome(run, fixed.kind, fixed.lastOutput, "same", fixed.conflicts) };
       }
       continue;
     }
@@ -419,7 +492,7 @@ async function reviewUntilAcceptable(
       phase(`検品の指摘を直す ${displayAttempt}/${cap}`);
       const fixed = await implementTasks(run, ticket, reviewed.issues);
       if (fixed.status === "stopped") {
-        return { status: "stop", outcome: stoppedOutcome(run, fixed.kind, fixed.lastOutput, "same") };
+        return { status: "stop", outcome: stoppedOutcome(run, fixed.kind, fixed.lastOutput, "same", fixed.conflicts) };
       }
     }
   }
@@ -574,8 +647,8 @@ async function finish(run: Run, result: Outcome): Promise<WorkflowResult> {
   };
 }
 
-function stoppedOutcome(run: Run, kind: StopKind, lastOutput: string, trend: LoopTrend): StoppedOutcome {
-  const stop = snapshot(run, kind, lastOutput, trend);
+function stoppedOutcome(run: Run, kind: StopKind, lastOutput: string, trend: LoopTrend, conflicts?: string[]): StoppedOutcome {
+  const stop = snapshot(run, kind, lastOutput, trend, conflicts);
   return {
     status: "escalated",
     reason: lastOutput,
@@ -594,7 +667,7 @@ function returnedOutcome(run: Run, questions: string[], lastOutput: string): Ret
   };
 }
 
-function snapshot(run: Run, kind: StopKind, lastOutput: string, trend: LoopTrend): StopSnapshot {
+function snapshot(run: Run, kind: StopKind, lastOutput: string, trend: LoopTrend, conflicts?: string[]): StopSnapshot {
   const wt = integration(run);
   return makeStopSnapshot({
     kind,
@@ -602,6 +675,7 @@ function snapshot(run: Run, kind: StopKind, lastOutput: string, trend: LoopTrend
     trend,
     branch: wt.branch,
     worktree: wt.path,
+    ...(kind === "conflict" ? { conflicts: conflicts ?? [] } : {}),
   });
 }
 

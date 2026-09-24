@@ -1,0 +1,18 @@
+{
+  "first": {
+    "calls": [
+      { "stage": "clarify", "text": "{\"decision\":\"proceed\",\"assumptions\":[]}" },
+      { "stage": "plan", "text": "{\"assumptions\":[],\"tasks\":[{\"id\":\"T1\",\"title\":\"Add greeting\",\"instructions\":\"Add hello.txt containing hello\",\"dependsOn\":[]}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "hello.txt", "content": "hello\n" }] },
+      { "stage": "review", "text": "{\"decision\":\"fix\",\"issues\":[{\"id\":\"fix-a\",\"title\":\"境界\",\"dependsOn\":[],\"instructions\":\"空白を拒否する\"}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "fix.txt", "content": "try\n" }] },
+      { "stage": "review", "text": "{\"decision\":\"fix\",\"issues\":[{\"id\":\"fix-a\",\"title\":\"境界\",\"dependsOn\":[],\"instructions\":\"空白を拒否する\"}]}" }
+    ]
+  },
+  "resume": {
+    "calls": [
+      { "stage": "implement", "text": "", "writes": [{ "path": "fix.txt", "content": "hinted\n" }] },
+      { "stage": "review", "text": "{\"decision\":\"pass\",\"concerns\":[]}" }
+    ]
+  }
+}

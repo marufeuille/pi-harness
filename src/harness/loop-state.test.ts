@@ -9,6 +9,7 @@ import {
   applyAnswers,
   applyHint,
   assertResumeAllowed,
+  loadLoopState,
   readyTasks,
   resumeActionFrom,
   saveLoopState,
@@ -101,4 +102,7 @@ test("再開状態を runDir に保存する", async () => {
   assert.equal(stored.stopKind, "decreasing-fatal");
   assert.equal(stored.originalMaxLoops, 3);
   assert.equal(stored.integrationBranch, "harness/run/integration");
+  const loaded = await loadLoopState(dir);
+  assert.equal(loaded.runId, "run");
+  assert.equal((await loadLoopState(path.join(dir, "loop-state.json"))).stopKind, "decreasing-fatal");
 });

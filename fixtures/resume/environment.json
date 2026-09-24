@@ -1,0 +1,14 @@
+{
+  "first": {
+    "calls": [
+      { "stage": "clarify", "text": "{\"decision\":\"proceed\",\"assumptions\":[]}" },
+      { "stage": "plan", "text": "{\"assumptions\":[],\"tasks\":[{\"id\":\"T1\",\"title\":\"Add greeting\",\"instructions\":\"Add hello.txt containing hello\",\"dependsOn\":[]}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "hello.txt", "content": "hello\n" }] }
+    ]
+  },
+  "resume": {
+    "calls": [
+      { "stage": "review", "text": "{\"decision\":\"pass\",\"concerns\":[]}" }
+    ]
+  }
+}

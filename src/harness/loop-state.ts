@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Task, Ticket } from "./contract.ts";
@@ -125,6 +125,44 @@ export function actionName(action: ResumeAction): "extraRounds" | "hint" | "repl
 export async function saveLoopState(runDir: string, state: LoopState): Promise<void> {
   await mkdir(runDir, { recursive: true });
   await writeFile(path.join(runDir, "loop-state.json"), JSON.stringify(state, null, 2));
+}
+
+export function loopStateFile(runDirOrFile: string): string {
+  return runDirOrFile.endsWith("loop-state.json") ? runDirOrFile : path.join(runDirOrFile, "loop-state.json");
+}
+
+export async function loadLoopState(runDirOrFile: string): Promise<LoopState> {
+  const file = loopStateFile(runDirOrFile);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    throw new Error(`再開状態を読めません: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isLoopState(raw)) {
+    throw new Error("再開状態の形式が不正です");
+  }
+  return raw;
+}
+
+function isLoopState(value: unknown): value is LoopState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.runId === "string" &&
+    typeof record.runDir === "string" &&
+    typeof record.integrationBranch === "string" &&
+    typeof record.integrationPath === "string" &&
+    typeof record.stopKind === "string" &&
+    typeof record.originalMaxLoops === "number" &&
+    Array.isArray(record.completedTaskIds) &&
+    Array.isArray(record.remainingTasks) &&
+    typeof record.ingestPosition === "number" &&
+    record.ticket !== undefined &&
+    record.plan !== undefined
+  );
 }
 
 function labelFor(name: ReturnType<typeof actionName>): string {
