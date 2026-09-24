@@ -3,7 +3,7 @@ import path from "node:path";
 import { runChecks } from "./checks.ts";
 import type { WorkflowConfig } from "./config.ts";
 import type { Plan, PullRequest, Steps, Task, Ticket } from "./contract.ts";
-import { archiveProfilerLogs } from "./observability.ts";
+import { archiveProfilerLogs, profilerLogFiles } from "./observability.ts";
 import { schedule } from "./schedule.ts";
 import { maskSecrets } from "./mask.ts";
 import { loadTicket } from "./ticket.ts";
@@ -51,7 +51,6 @@ type Run = {
   repo: string;
   runId: string;
   runDir: string;
-  startedAt: number;
   baseBranch: string;
   baseSha: string;
   config: WorkflowConfig;
@@ -67,8 +66,9 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
 
   phase("要件を確認する");
   let clarification;
+  const clarifyLogs = await profilerLogFiles(input.repo);
   clarification = await input.steps.clarify({ ticket, cwd: input.repo });
-  await keepLogs(run, "clarify", input.repo);
+  await keepLogs(run, "clarify", input.repo, clarifyLogs);
   if ("decision" in clarification && clarification.decision === "json-read-failed") {
     recordJsonFailure(run, clarification);
     return finish(run, { status: "returned", questions: ["要件確認の返答から JSON を読み取れませんでした"] });
@@ -84,8 +84,9 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
 
   phase("プランを作る");
   let plan;
+  const planLogs = await profilerLogFiles(input.repo);
   plan = await input.steps.plan({ ticket, assumptions: clarification.assumptions, cwd: input.repo });
-  await keepLogs(run, "plan", input.repo);
+  await keepLogs(run, "plan", input.repo, planLogs);
   if ("decision" in plan && plan.decision === "json-read-failed") {
     recordJsonFailure(run, plan);
     return finish(run, { status: "returned", questions: ["プランの返答から JSON を読み取れませんでした"] });
@@ -170,8 +171,9 @@ async function implementTasks(
 
     const outcomes = await Promise.all(
       prepared.map(async ({ task, worktree }) => {
+        const logsBefore = await profilerLogFiles(worktree.path);
         await run.steps.implement({ task, worktree, ticket });
-        await keepLogs(run, task.id, worktree.path);
+        await keepLogs(run, task.id, worktree.path, logsBefore);
         const branch = await currentBranch(worktree.path);
         if (branch !== worktree.branch) {
           return {
@@ -240,8 +242,9 @@ async function reviewUntilAcceptable(
 
     phase(`検品する ${attempt}/${maxLoops}`);
     let review;
+    const reviewLogs = await profilerLogFiles(integration(run).path);
     review = await run.steps.review({ ticket, plan, attempt, maxLoops, cwd: integration(run).path, baseSha: run.baseSha });
-    await keepLogs(run, `review-${attempt}`, integration(run).path);
+    await keepLogs(run, `review-${attempt}`, integration(run).path, reviewLogs);
     if (review.decision === "json-read-failed") {
       recordJsonFailure(run, review);
       if (attempt === maxLoops) return { decision: "escalate", reason: "修正ループの上限に達したため、人に戻します" };
@@ -270,7 +273,6 @@ function beginRun(input: WorkflowInput): Run {
     repo: input.repo,
     runId,
     runDir: runDirectory(input.repo, runId),
-    startedAt: Date.now(),
     baseBranch: "",
     baseSha: "",
     config: input.config,
@@ -291,8 +293,8 @@ function integration(run: Run): Worktree {
   return run.integration;
 }
 
-async function keepLogs(run: Run, label: string, cwd: string): Promise<void> {
-  await archiveProfilerLogs(cwd, path.join(run.runDir, "observability", label), run.startedAt);
+async function keepLogs(run: Run, label: string, cwd: string, before: ReadonlySet<string>): Promise<void> {
+  await archiveProfilerLogs(cwd, path.join(run.runDir, "observability", label), before);
 }
 
 function recordJsonFailure(run: Run, failure: import("./contract.ts").JsonReadFailure): void {
