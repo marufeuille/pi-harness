@@ -12,7 +12,7 @@ LINEAR_API_KEY='your-linear-api-key' npm run harness -- --linear https://linear.
 
 ## E2E テスト
 
-`npm run test:e2e` は単体テストとは独立して実行します。`HARNESS_E2E_FIXTURE` に固定応答を定義した専用チケットを指定すると、`npm run harness` と同じ `src/harness/main.ts` を別プロセスで起動します。テストは一時 git リポジトリを作成し、終了時に一時データを削除します。子プロセスには120秒の上限があります。固定応答 fixture は外部モデル API を使わず、明確なチケットでは ready と取り込み結果、曖昧なチケットでは質問と returned を検証する形式です。`npm test` には含まれません。
+`npm run test:e2e` は単体テストと独立して実行します。テスト自身が Markdown チケット、固定応答 JSON、専用の外部フェーズ無効設定、および一時 git リポジトリを作り、`npm run harness` と同じ入口を子プロセスで起動します。API キー不要でモデル API・Linear・GitHub へ接続せず、明確なチケットの実装取り込みと `ready`、曖昧なチケットの質問と `returned`、未実装を検証します。一時データは終了時に削除され、子プロセスには120秒の上限があります。`npm test` には含まれません。
 
 ## セッションログ
 
