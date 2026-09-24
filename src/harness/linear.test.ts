@@ -1,9 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { loadLinearIssue } from "./linear.ts";
+import { loadLinearTicket } from "./ticket.ts";
+import { runWorkflow } from "./workflow.ts";
+import type { Steps } from "./contract.ts";
+import type { WorkflowConfig } from "./config.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const response = (status: number, payload: unknown) => new Response(JSON.stringify(payload), { status });
 const issue = { data: { issue: { identifier: "ABC-1", title: "Title", description: "  exact body\n" } } };
+
+const minimalConfig: () => WorkflowConfig = () => ({ models: { smart: "test", cheap: "test" }, phases: { pullRequest: false, requireCi: false, merge: false, productionCheck: false }, review: { maxLoops: 1 }, checks: [] });
+function workflowSteps(overrides: Partial<Steps>): Steps {
+  const unavailable = async (): Promise<never> => { throw new Error("unexpected step"); };
+  return { clarify: unavailable, plan: unavailable, implement: unavailable, review: unavailable, openPullRequest: unavailable, waitForChecks: unavailable, merge: unavailable, checkProduction: unavailable, ...overrides };
+}
 
 test("loads issue via fixed API endpoint, retaining body verbatim", async () => {
   let requestedUrl = "";
@@ -30,6 +43,26 @@ test("reports safe failure categories", async () => {
   assert.deepEqual(await run(200, { data: { issue: { title: "T", description: " \n" } } }), { ok: false, reason: "empty_body" });
   assert.deepEqual(await loadLinearIssue("ABC-1", { apiKey: "token", fetch: async () => { throw Error("secret"); } }), { ok: false, reason: "communication" });
   assert.deepEqual(await loadLinearIssue("ABC-1", { fetch: async () => response(200, issue) }), { ok: false, reason: "authentication" });
+});
+
+test("Linear ID and URL preserve ticket content and enter the normal clarification sequence", async () => {
+  for (const input of ["ABC-1", "https://linear.app/acme/issue/ABC-1/example"]) {
+    let calls = 0;
+    const loaded = await loadLinearIssue(input, { apiKey: "secret", fetch: async () => response(200, issue) });
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) continue;
+    const repo = await mkdtemp(path.join(tmpdir(), "linear-workflow-"));
+    const sequence: string[] = [];
+    try {
+      const result = await runWorkflow({ repo, ticket: loaded.ticket, config: minimalConfig(), steps: workflowSteps({
+        clarify: async ({ ticket }) => { calls++; sequence.push("clarify"); assert.equal(ticket.title, "Title"); assert.equal(ticket.body, "  exact body\n"); return { decision: "return", questions: [] }; },
+        plan: async () => { sequence.push("plan"); throw Error("unexpected"); },
+      }) });
+      assert.equal(result.status, "returned");
+      assert.deepEqual(sequence, ["clarify"]);
+    } finally { await rm(repo, { recursive: true, force: true }); }
+    assert.equal(calls, 1);
+  }
 });
 
 test("rejects non-Linear URLs before making a request", async () => {
