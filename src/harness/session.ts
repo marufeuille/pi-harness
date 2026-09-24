@@ -10,7 +10,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-import type { ModelAlias } from "./models.ts";
+import type { ModelAlias, ModelSpec } from "./models.ts";
 import { modelCatalog } from "./models.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -30,7 +30,7 @@ export async function runRole(options: {
   role: "smart" | "cheap";
   fixture?: OfflineFixture;
   stage?: string;
-  model: ModelAlias;
+  model: ModelAlias | ModelSpec;
   cwd: string;
   prompt: string;
   tools: string[];
@@ -51,7 +51,7 @@ export async function runRole(options: {
     }
     return call.text;
   }
-  const spec = modelCatalog[options.model];
+  const spec = typeof options.model === "string" ? modelCatalog[options.model] : options.model;
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsStorePath: path.join(agentDir, "models-store.json"),
