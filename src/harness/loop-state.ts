@@ -26,6 +26,7 @@ export type LoopState = {
   plan: TaskPlan;
   originalMaxLoops: number;
   stopKind: StopKind;
+  linearIssueId?: string;
 };
 
 export type ResumeAction =
@@ -169,7 +170,8 @@ function isLoopState(value: unknown): value is LoopState {
     Array.isArray(record.remainingTasks) &&
     typeof record.ingestPosition === "number" &&
     record.ticket !== undefined &&
-    record.plan !== undefined
+    record.plan !== undefined &&
+    (record.linearIssueId === undefined || (typeof record.linearIssueId === "string" && record.linearIssueId.length > 0))
   );
 }
 

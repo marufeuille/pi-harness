@@ -32,7 +32,7 @@ import {
 import { archiveProfilerLogs, profilerLogFiles } from "./observability.ts";
 import { schedule } from "./schedule.ts";
 import { maskSecrets } from "./mask.ts";
-import { loadTicket } from "./ticket.ts";
+import { loadTicket, linearIssueIdFromTicket } from "./ticket.ts";
 import {
   commitsAhead,
   commitAll,
@@ -62,6 +62,7 @@ export type WorkflowInput = {
   steps: Steps;
   baseRevision?: string;
   resume?: ResumeInput;
+  linearIssueId?: string;
 };
 
 type StoppedOutcome = {
@@ -115,6 +116,7 @@ type Run = {
   originalMaxLoops: number;
   loopBudget: number;
   shouldPublishBase: boolean;
+  linearIssueId?: string;
 };
 
 export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult> {
@@ -603,10 +605,12 @@ function beginRun(input: WorkflowInput): Run {
     originalMaxLoops: input.config.review.maxLoops,
     loopBudget: input.config.review.maxLoops,
     shouldPublishBase: false,
+    ...(input.linearIssueId ? { linearIssueId: input.linearIssueId } : {}),
   };
 }
 
 function resumeRun(input: WorkflowInput, state: LoopState, action: ResumeAction): Run {
+  const linearIssueId = state.linearIssueId ?? linearIssueIdFromTicket(state.ticket);
   return {
     repo: input.repo,
     runId: state.runId,
@@ -628,6 +632,7 @@ function resumeRun(input: WorkflowInput, state: LoopState, action: ResumeAction)
     originalMaxLoops: state.originalMaxLoops,
     loopBudget: "extraRounds" in action ? action.extraRounds : state.originalMaxLoops,
     shouldPublishBase: false,
+    ...(linearIssueId ? { linearIssueId } : {}),
   };
 }
 
@@ -726,6 +731,7 @@ function captureState(run: Run, stopKind: StopKind): LoopState {
     plan: run.plan,
     originalMaxLoops: run.originalMaxLoops,
     stopKind,
+    ...(run.linearIssueId ? { linearIssueId: run.linearIssueId } : {}),
   };
 }
 

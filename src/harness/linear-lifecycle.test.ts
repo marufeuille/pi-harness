@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runLinearLifecycle, updateLinearStateResult } from "./linear-lifecycle.ts";
+import { runLinearLifecycle, resolveResumeLinearIssueId, updateLinearStateResult } from "./linear-lifecycle.ts";
 import type { WorkflowResult } from "./workflow.ts";
 
 const result = (status: WorkflowResult["status"]) => ({ status } as WorkflowResult);
@@ -88,3 +88,18 @@ test("resume keeps In Progress and still completes only on ready or production-o
   assert.deepEqual(calls, []);
   assert.equal(returned.ok, true);
 });
+
+test("resume Linear identity matches saved issue and rejects a different issue before work", () => {
+  assert.deepEqual(resolveResumeLinearIssueId({ saved: "ABC-1" }), { ok: true, issueId: "ABC-1" });
+  assert.deepEqual(resolveResumeLinearIssueId({ requested: "ABC-1", saved: "ABC-1" }), { ok: true, issueId: "ABC-1" });
+  assert.deepEqual(
+    resolveResumeLinearIssueId({ requested: "https://linear.app/acme/issue/ABC-1/example", saved: "ABC-1" }),
+    { ok: true, issueId: "ABC-1" },
+  );
+  assert.deepEqual(resolveResumeLinearIssueId({ saved: undefined }), { ok: true, issueId: undefined });
+  const mismatch = resolveResumeLinearIssueId({ requested: "XYZ-9", saved: "ABC-1" });
+  assert.equal(mismatch.ok, false);
+  if (!mismatch.ok) assert.match(mismatch.reason, /異なる/);
+  assert.equal(resolveResumeLinearIssueId({ requested: "ABC-1" }).ok, false);
+});
+

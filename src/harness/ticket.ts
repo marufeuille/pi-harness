@@ -11,6 +11,13 @@ export async function loadTicket(ticketPath: string): Promise<Ticket> {
   return { path: ticketPath, title, body };
 }
 
+export function linearIssueIdFromTicket(ticket: Ticket): string | undefined {
+  const prefix = "linear:";
+  if (!ticket.path.startsWith(prefix)) return undefined;
+  const id = ticket.path.slice(prefix.length).trim();
+  return id || undefined;
+}
+
 export async function loadLinearTicket(identifier: string): Promise<Ticket> {
   const result = await loadLinearIssue(identifier);
   if (!result.ok) {
