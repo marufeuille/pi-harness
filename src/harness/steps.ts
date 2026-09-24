@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { WorkflowConfig } from "./config.ts";
@@ -108,10 +108,11 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
         role: "smart", fixture, stage: "review",
         model: modelFor(smart),
         cwd,
-        tools: toolsFor("read").concat("bash"),
+        tools: toolsFor("read"),
         prompt: [
           "実装がチケットの要求を満たしているか検品してください。",
-          `変更は git diff ${baseSha} で見られます。`,
+          "以下はハーネスが安全な読み取り専用経路で取得した差分です。",
+          execFileSync("git", ["diff", "--no-ext-diff", baseSha, "--"], { cwd, encoding: "utf8" }),
           "直すべきなのは、要求との不一致と重大なセキュリティ上の問題だけです。",
           "記法、わずかな非効率、確率の低い懸念は concerns に残さず捨ててください。",
           `これは ${attempt} 回目で、上限は ${maxLoops} 回です。`,

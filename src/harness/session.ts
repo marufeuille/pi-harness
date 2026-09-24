@@ -21,6 +21,17 @@ const cursorExtensionPath = path.join(harnessRoot, "node_modules", "pi-cursor-sd
 const readOnlyTools = ["read", "grep", "find", "ls"];
 const editTools = ["read", "edit", "write", "grep", "find", "ls"];
 
+export function assertWriteAllowed(role: "read" | "edit", cwd: string, targetPath: string): string {
+  if (role !== "edit") throw new Error("読み取り役割ではファイル変更は禁止されています");
+  if (path.isAbsolute(targetPath)) throw new Error("絶対パスへの書き込みは禁止されています");
+  const target = path.resolve(cwd, targetPath);
+  const relative = path.relative(path.resolve(cwd), target);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("作業ツリー外への書き込みは禁止されています");
+  }
+  return target;
+}
+
 export function toolsFor(role: "read" | "edit"): string[] {
   return role === "edit" ? editTools : readOnlyTools;
 }
@@ -42,10 +53,7 @@ export async function runRole(options: {
     if (call.writes) {
       if (options.stage !== "implement") throw new Error("実装以外の段階では writes を指定できません");
       for (const { path: relative, content } of call.writes) {
-        if (path.isAbsolute(relative)) throw new Error("絶対パスへの書き込みは禁止されています");
-        const target = path.resolve(options.cwd, relative);
-        const rel = path.relative(options.cwd, target);
-        if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error("作業ツリー外への書き込みは禁止されています");
+        const target = assertWriteAllowed("edit", options.cwd, relative);
         await fs.mkdir(path.dirname(target), { recursive: true });
         await fs.writeFile(target, content, "utf8");
       }
