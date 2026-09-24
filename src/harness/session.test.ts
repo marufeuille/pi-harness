@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertWriteAllowed, toolsFor } from "./session.ts";
+import { applyStreamOptions, assertWriteAllowed, toolsFor } from "./session.ts";
+
+test("fast invocation setting reaches the model stream boundary, including false and default true", () => {
+  for (const fast of [true, false, undefined]) {
+    let received: Record<string, unknown> | undefined;
+    const model = { stream(_request: unknown, options: Record<string, unknown> = {}) { received = options; } };
+    applyStreamOptions(model, { fast: fast ?? true });
+    model.stream({});
+    assert.equal(received?.fast, fast ?? true);
+  }
+});
 
 test("roles never expose unrestricted shell commands", () => {
   assert.equal(toolsFor("read").includes("bash"), false);

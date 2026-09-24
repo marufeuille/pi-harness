@@ -55,6 +55,13 @@ export function toolsFor(role: "read" | "edit"): string[] {
   return role === "edit" ? editTools : readOnlyTools;
 }
 
+export function applyStreamOptions<T extends { stream: (...args: any[]) => any }>(model: T, options: Record<string, unknown>): T {
+  const stream = model.stream.bind(model);
+  model.stream = ((request: any, streamOptions: Record<string, unknown> = {}, ...args: any[]) =>
+    stream(request, { ...streamOptions, ...options }, ...args)) as T["stream"];
+  return model;
+}
+
 export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }> }> ; index: number };
 
 export async function runRole(options: {
@@ -168,11 +175,11 @@ export async function runRole(options: {
       throw new Error("profiler のログファイルを作成できませんでした");
     }
 
-    // These are invocation-level stream settings in Pi. PromptOptions itself
-    // does not define provider parameters; streamOptions are forwarded to the
-    // active model's stream call by the SDK.
+    // PromptOptions in SDK 0.87.1 does not forward provider stream options.
+    // Wrap the selected model's actual stream boundary instead.
     const { effort: _effort, contextWindow: _contextWindow, ...streamOptions } = parameters;
-    await session.prompt(options.prompt, { streamOptions });
+    if (Object.keys(streamOptions).length > 0) applyStreamOptions(model, streamOptions);
+    await session.prompt(options.prompt);
     const text = session.getLastAssistantText();
     if (!text) {
       throw new Error("モデルがテキストを返しませんでした");
