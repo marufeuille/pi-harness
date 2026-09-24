@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -164,6 +164,52 @@ test("チェック失敗は安いモデルの修正タスクになり、直っ�
     assert.equal(result.status, "ready");
     assert.ok(result.integrationPath);
     assert.equal(await readFile(path.join(result.integrationPath, "marker"), "utf8"), "ok");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("各段階の profiler jsonl を段階名とファイル名を保って保存する", async () => {
+  const repo = await initRepo();
+  const expected = new Map<string, { cwd: string; name: string; content: string }>();
+  const createLog = async (label: string, cwd: string) => {
+    const name = `${label}.jsonl`;
+    const content = `{"stage":"${label}","tool":"read"}\\n`;
+    const directory = path.join(cwd, ".pi-observability");
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, name), content);
+    expected.set(label, { cwd, name, content });
+  };
+  try {
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async ({ cwd }) => {
+          await createLog("clarify", cwd);
+          return { decision: "proceed", assumptions: [] };
+        },
+        plan: async ({ cwd }) => {
+          await createLog("plan", cwd);
+          return { assumptions: [], tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }] };
+        },
+        implement: async ({ worktree, task }) => createLog(task.id, worktree.path),
+        review: async ({ cwd }) => {
+          await createLog("review-1", cwd);
+          return { decision: "pass", concerns: [] };
+        },
+      }),
+    });
+    assert.equal(result.status, "ready");
+    for (const [label, log] of expected) {
+      const archived = path.join(result.runDir, "observability", label);
+      assert.ok((await readdir(archived)).includes(log.name));
+      assert.equal(await readFile(path.join(archived, log.name), "utf8"), log.content);
+    }
+    const taskLog = expected.get("feature");
+    assert.ok(taskLog);
+    await assert.rejects(readdir(taskLog.cwd));
   } finally {
     await rm(repo, { recursive: true, force: true });
   }
