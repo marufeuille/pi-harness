@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,7 @@ const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentDir = path.join(harnessRoot, ".pi-clean");
 const profilerPath = path.join(harnessRoot, "extensions", "profiler.ts");
 const cursorExtensionPath = path.join(harnessRoot, "node_modules", "pi-cursor-sdk", "dist", "index.js");
+const boundaryExtensionPath = path.join(harnessRoot, "extensions", "role-boundary.ts");
 
 const readOnlyTools = ["read", "grep", "find", "ls"];
 const editTools = ["read", "edit", "write", "grep", "find", "ls"];
@@ -24,10 +26,28 @@ const editTools = ["read", "edit", "write", "grep", "find", "ls"];
 export function assertWriteAllowed(role: "read" | "edit", cwd: string, targetPath: string): string {
   if (role !== "edit") throw new Error("読み取り役割ではファイル変更は禁止されています");
   if (path.isAbsolute(targetPath)) throw new Error("絶対パスへの書き込みは禁止されています");
-  const target = path.resolve(cwd, targetPath);
-  const relative = path.relative(path.resolve(cwd), target);
+  const root = path.resolve(cwd);
+  const target = path.resolve(root, targetPath);
+  const relative = path.relative(root, target);
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error("作業ツリー外への書き込みは禁止されています");
+  }
+  // Resolve existing path components to prevent writes through symlinks.
+  let existing = target;
+  while (true) {
+    try {
+      const real = fsSync.realpathSync(existing);
+      const realRelative = path.relative(fsSync.realpathSync(root), real);
+      if (realRelative === ".." || realRelative.startsWith(`..${path.sep}`) || path.isAbsolute(realRelative)) {
+        throw new Error("作業ツリー外への書き込みは禁止されています");
+      }
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) break;
+      existing = parent;
+    }
   }
   return target;
 }
@@ -66,6 +86,10 @@ export async function runRole(options: {
     modelsStorePath: path.join(agentDir, "models-store.json"),
     refreshOnCreate: false,
   });
+  const priorRole = process.env.PI_HARNESS_ROLE;
+  const priorCwd = process.env.PI_HARNESS_CWD;
+  process.env.PI_HARNESS_ROLE = options.tools.includes("write") ? "edit" : "read";
+  process.env.PI_HARNESS_CWD = options.cwd;
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir,
@@ -73,12 +97,17 @@ export async function runRole(options: {
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    additionalExtensionPaths: [profilerPath, cursorExtensionPath],
+    additionalExtensionPaths: [profilerPath, cursorExtensionPath, boundaryExtensionPath],
     systemPrompt:
       "あなたはハーネスから呼ばれた作業者です。渡された作業だけを行い、スキルの探索や関係ないツール追加はしないでください。",
     settingsManager: SettingsManager.inMemory(),
   });
-  await resourceLoader.reload();
+  try {
+    await resourceLoader.reload();
+  } finally {
+    if (priorRole === undefined) delete process.env.PI_HARNESS_ROLE; else process.env.PI_HARNESS_ROLE = priorRole;
+    if (priorCwd === undefined) delete process.env.PI_HARNESS_CWD; else process.env.PI_HARNESS_CWD = priorCwd;
+  }
 
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
