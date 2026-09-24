@@ -18,7 +18,6 @@ const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentDir = path.join(harnessRoot, ".pi-clean");
 const profilerPath = path.join(harnessRoot, "extensions", "profiler.ts");
 const cursorExtensionPath = path.join(harnessRoot, "node_modules", "pi-cursor-sdk", "dist", "index.js");
-const boundaryExtensionPath = path.join(harnessRoot, "extensions", "role-boundary.ts");
 
 const readOnlyTools = ["read", "grep", "find", "ls"];
 const editTools = ["read", "edit", "write", "grep", "find", "ls"];
@@ -86,10 +85,6 @@ export async function runRole(options: {
     modelsStorePath: path.join(agentDir, "models-store.json"),
     refreshOnCreate: false,
   });
-  const priorRole = process.env.PI_HARNESS_ROLE;
-  const priorCwd = process.env.PI_HARNESS_CWD;
-  process.env.PI_HARNESS_ROLE = options.tools.includes("write") ? "edit" : "read";
-  process.env.PI_HARNESS_CWD = options.cwd;
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir,
@@ -97,17 +92,12 @@ export async function runRole(options: {
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    additionalExtensionPaths: [profilerPath, cursorExtensionPath, boundaryExtensionPath],
+    additionalExtensionPaths: [profilerPath, cursorExtensionPath],
     systemPrompt:
       "あなたはハーネスから呼ばれた作業者です。渡された作業だけを行い、スキルの探索や関係ないツール追加はしないでください。",
     settingsManager: SettingsManager.inMemory(),
   });
-  try {
-    await resourceLoader.reload();
-  } finally {
-    if (priorRole === undefined) delete process.env.PI_HARNESS_ROLE; else process.env.PI_HARNESS_ROLE = priorRole;
-    if (priorCwd === undefined) delete process.env.PI_HARNESS_CWD; else process.env.PI_HARNESS_CWD = priorCwd;
-  }
+  await resourceLoader.reload();
 
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
