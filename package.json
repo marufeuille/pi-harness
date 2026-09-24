@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Markdown ticket workflow on top of Pi",
   "scripts": {
-    "test": "node --import tsx --test src/harness/contract.test.ts src/harness/mask.test.ts src/harness/schedule.test.ts src/harness/config.test.ts src/harness/workflow.test.ts src/harness/ticket.test.ts src/harness/linear.test.ts src/harness/linear-lifecycle.test.ts extensions/profiler.test.ts",
+    "test": "node --import tsx --test src/harness/contract.test.ts src/harness/mask.test.ts src/harness/merge.test.ts src/harness/schedule.test.ts src/harness/config.test.ts src/harness/workflow.test.ts src/harness/ticket.test.ts src/harness/linear.test.ts src/harness/linear-lifecycle.test.ts extensions/profiler.test.ts",
     "harness": "tsx src/harness/main.ts",
     "test:e2e": "node --import tsx --test e2e/acceptance.test.ts"
   },

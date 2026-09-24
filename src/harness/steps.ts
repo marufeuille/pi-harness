@@ -12,6 +12,7 @@ import {
   type JsonReadFailure,
   type Steps,
 } from "./contract.ts";
+import { mergePullRequestWhenReady } from "./merge.ts";
 import { runGit } from "./worktrees.ts";
 import { runRole, toolsFor, type OfflineFixture } from "./session.ts";
 import { maskSecrets } from "./mask.ts";
@@ -158,9 +159,11 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
     },
 
     async merge({ cwd, pullRequest }) {
-      await execFileAsync("gh", ["pr", "merge", String(pullRequest.number), "--merge"], {
-        cwd,
-        encoding: "utf8",
+      await mergePullRequestWhenReady((args) => runGh(cwd, args), {
+        number: pullRequest.number,
+        onWaiting: () => {
+          process.stderr.write("[harness] 必須のステータスチェックを待つ\n");
+        },
       });
     },
 
@@ -175,6 +178,11 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
       }
     },
   };
+}
+
+async function runGh(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("gh", args, { cwd, encoding: "utf8" });
+  return stdout;
 }
 
 function readJson(text: string, stage: JsonReadFailure["stage"], attempt: number): unknown | JsonReadFailure {
