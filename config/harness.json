@@ -2,7 +2,7 @@
   "models": {
     "smart": "astra",
     "cheap": "grok",
-    "cursorGrokId": "cursor/grok-4.6"
+    "cursorGrokId": "grok-4.6"
   },
   "phases": {
     "pullRequest": false,

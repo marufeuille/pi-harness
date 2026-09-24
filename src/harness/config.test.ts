@@ -10,10 +10,10 @@ const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 test("既定の設定は astra で考え、grok で実装し、PR 以降は止める", async () => {
   const config = await loadConfig(path.join(harnessRoot, "config", "harness.json"));
-  assert.deepEqual(config.models, { smart: "astra", cheap: "grok", cursorGrokId: "cursor/grok-4.6" });
+  assert.deepEqual(config.models, { smart: "astra", cheap: "grok", cursorGrokId: "grok-4.6" });
   assert.equal(config.phases.pullRequest, false);
   assert.equal(config.phases.merge, false);
-  assert.equal(modelCatalog.grok.id, "cursor/grok-4.6");
+  assert.equal(modelCatalog.grok.id, "grok-4.6");
   assert.equal(modelCatalog.fable.id, "claude-fable-5-1");
 });
 
@@ -28,16 +28,16 @@ test("モデルの組み合わせは別名で差し替えられる", () => {
   assert.deepEqual(config.checks, ["npm test"]);
 });
 
-test("Cursor Grok ID は任意で指定でき、書式だけを検証する", () => {
+test("Cursor Grok ID は任意の非空文字列を受け入れる", () => {
   const base = {
     models: { smart: "astra", cheap: "grok" },
     phases: { pullRequest: false, requireCi: false, merge: false, productionCheck: false },
     review: { maxLoops: 1 },
   };
   assert.equal(parseConfig(base).models.cursorGrokId, undefined);
-  assert.equal(parseConfig({ ...base, models: { ...base.models, cursorGrokId: "cursor/grok-4.7" } }).models.cursorGrokId, "cursor/grok-4.7");
-  assert.throws(() => parseConfig({ ...base, models: { ...base.models, cursorGrokId: "grok-4.7" } }), /models\.cursorGrokId/);
-  assert.throws(() => parseConfig({ ...base, models: { ...base.models, cursorGrokId: "cursor/" } }), /models\.cursorGrokId/);
+  assert.equal(parseConfig({ ...base, models: { ...base.models, cursorGrokId: "grok-4.7" } }).models.cursorGrokId, "grok-4.7");
+  assert.equal(parseConfig({ ...base, models: { ...base.models, cursorGrokId: "custom/model id" } }).models.cursorGrokId, "custom/model id");
+  assert.throws(() => parseConfig({ ...base, models: { ...base.models, cursorGrokId: "  " } }), /models\.cursorGrokId/);
 });
 
 test("知らないモデル名と、順序が崩れた段階は受け取らない", () => {
