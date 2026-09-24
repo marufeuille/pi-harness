@@ -11,19 +11,24 @@ export const modelCatalog: Record<string, ModelSpec> = {
   fable: { provider: "anthropic", id: "claude-fable-5-1", parameters: { effort: "high" } },
 };
 
-type ParameterRule = { values?: unknown[]; range?: [number, number]; default?: unknown; required?: boolean };
-type ModelDefinition = { provider: string; id: string; parameters: Record<string, ParameterRule> };
+export type ParameterRule = { values?: unknown[]; range?: [number, number]; default?: unknown; required?: boolean };
+export type ModelDefinition = { provider: string; id: string; parameters: Record<string, ParameterRule> };
 const effort = (value: string): ParameterRule => ({ values: ["low", "medium", "high", "xhigh"], default: value });
 const definitions: ModelDefinition[] = [
   { provider: "openai-codex", id: "gpt-6-astra", parameters: { effort: effort("high"), contextWindow: { range: [1, 1000000] } } },
   { provider: "openai-codex", id: "gpt-6-luna", parameters: { effort: effort("medium"), contextWindow: { range: [1, 1000000] } } },
   { provider: "cursor", id: "grok-4.6", parameters: { effort: effort("medium"), fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
   { provider: "cursor", id: "grok-4.7", parameters: { effort: effort("medium"), fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
-  { provider: "xai", id: "grok-4.7", parameters: { effort: effort("medium"), fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
+  { provider: "xai", id: "grok-4.7", parameters: { effort: { values: ["low", "medium", "high", "xhigh"], default: "medium" }, fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
   { provider: "anthropic", id: "claude-fable-5-1", parameters: { effort: effort("high"), contextWindow: { range: [1, 200000] } } },
 ];
-// This registry mirrors provider catalog capabilities and is the offline preflight source.
+// Model capability metadata is the provider/runtime catalog snapshot used for offline preflight.
+// Keep this catalog extensible: adding a catalog entry makes that model selectable by ID.
 export const modelDefinitions: Record<string, ModelDefinition> = Object.fromEntries(definitions.map((d) => [`${d.provider}/${d.id}`, d]));
+
+export function registerModelDefinition(definition: ModelDefinition): void {
+  modelDefinitions[`${definition.provider}/${definition.id}`] = definition;
+}
 
 export function resolveAndValidateModel(model: ModelSpec, target: string): ModelSpec {
   const definition = modelDefinitions[`${model.provider}/${model.id}`];
