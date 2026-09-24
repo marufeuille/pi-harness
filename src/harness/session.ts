@@ -55,11 +55,16 @@ export function toolsFor(role: "read" | "edit"): string[] {
   return role === "edit" ? editTools : readOnlyTools;
 }
 
-export function applyStreamOptions<T extends { stream: (...args: any[]) => any }>(model: T, options: Record<string, unknown>): T {
-  const stream = model.stream.bind(model);
-  model.stream = ((request: any, streamOptions: Record<string, unknown> = {}, ...args: any[]) =>
-    stream(request, { ...streamOptions, ...options }, ...args)) as T["stream"];
-  return model;
+type StreamRuntime = {
+  streamSimple: (model: unknown, context: unknown, options?: Record<string, unknown>) => unknown;
+};
+
+/** Intercept the SDK's stream invocation boundary; runtime models themselves do not expose stream(). */
+export function applyStreamOptions<T extends StreamRuntime>(runtime: T, options: Record<string, unknown>): T {
+  const streamSimple = runtime.streamSimple.bind(runtime);
+  runtime.streamSimple = ((model: unknown, context: unknown, streamOptions: Record<string, unknown> = {}) =>
+    streamSimple(model, context, { ...streamOptions, ...options })) as T["streamSimple"];
+  return runtime;
 }
 
 export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }> }> ; index: number };
@@ -177,9 +182,9 @@ export async function runRole(options: {
     }
 
     // PromptOptions in SDK 0.87.1 does not forward provider stream options.
-    // Wrap the selected model's actual stream boundary instead.
+    // Apply them at the ModelRuntime boundary used by the SDK (models have no stream()).
     const { effort: _effort, contextWindow: _contextWindow, ...streamOptions } = parameters;
-    if (Object.keys(streamOptions).length > 0) applyStreamOptions(model, streamOptions);
+    if (Object.keys(streamOptions).length > 0) applyStreamOptions(modelRuntime as any, streamOptions);
     await session.prompt(options.prompt);
     const text = session.getLastAssistantText();
     if (!text) {
