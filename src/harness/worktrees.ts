@@ -53,11 +53,32 @@ export async function ensureGitRepo(repo: string): Promise<string> {
   return branch;
 }
 
-export async function openIntegrationWorktree(repo: string, runId: string): Promise<Worktree> {
+export async function resolveBase(repo: string, revision?: string): Promise<{ sha: string; branch: string }> {
+  try {
+    await runGit(repo, ["fetch", "origin", "main"]);
+  } catch (error) {
+    throw new Error(`origin/main の取得に失敗しました: ${String(error)}`);
+  }
+  const rev = revision ?? "FETCH_HEAD";
+  let sha: string;
+  try {
+    sha = await runGit(repo, ["rev-parse", "--verify", `${rev}^{commit}`]);
+  } catch (error) {
+    throw new Error(`起点リビジョン ${rev} をコミット SHA に解決できません: ${String(error)}`);
+  }
+  return { sha, branch: revision ? `harness/${sha.slice(0, 12)}` : "main" };
+}
+
+export async function publishBaseBranch(repo: string, branch: string, sha: string): Promise<void> {
+  await runGit(repo, ["branch", branch, sha]);
+  await runGit(repo, ["push", "origin", `${branch}:${branch}`]);
+}
+
+export async function openIntegrationWorktree(repo: string, runId: string, baseSha: string): Promise<Worktree> {
   const branch = `harness/${runId}/integration`;
   const worktreePath = path.join(runDirectory(repo, runId), "integration");
   await mkdir(path.dirname(worktreePath), { recursive: true });
-  await runGit(repo, ["worktree", "add", "-b", branch, worktreePath, "HEAD"]);
+  await runGit(repo, ["worktree", "add", "-b", branch, worktreePath, baseSha]);
   return { path: worktreePath, branch };
 }
 
