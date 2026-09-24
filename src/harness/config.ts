@@ -1,115 +1,36 @@
 import { readFile } from "node:fs/promises";
-
-import { modelCatalog, type ModelAlias } from "./models.ts";
+import { modelCatalog, type ModelSpec } from "./models.ts";
 
 export type WorkflowConfig = {
-  models: {
-    smart: ModelAlias;
-    cheap: ModelAlias;
-    cursorGrokId?: string;
-  };
-  phases: {
-    pullRequest: boolean;
-    requireCi: boolean;
-    merge: boolean;
-    productionCheck: boolean;
-  };
-  review: {
-    maxLoops: number;
-  };
+  models: { smart: ModelSpec; cheap: ModelSpec; cursorGrokId?: string };
+  phases: { pullRequest: boolean; requireCi: boolean; merge: boolean; productionCheck: boolean };
+  review: { maxLoops: number };
   checks: string[];
   productionCheckCommand?: string;
 };
-
-export async function loadConfig(configPath: string): Promise<WorkflowConfig> {
-  const raw = JSON.parse(await readFile(configPath, "utf8")) as unknown;
-  return parseConfig(raw);
-}
-
+export async function loadConfig(configPath: string): Promise<WorkflowConfig> { return parseConfig(JSON.parse(await readFile(configPath, "utf8")) as unknown); }
 export function parseConfig(raw: unknown): WorkflowConfig {
-  const record = asRecord(raw, "設定");
-  const models = asRecord(record.models, "models");
-  const phases = asRecord(record.phases, "phases");
-  const review = asRecord(record.review, "review");
-
-  const config: WorkflowConfig = {
-    models: {
-      smart: alias(models.smart, "models.smart"),
-      cheap: alias(models.cheap, "models.cheap"),
-      ...(models.cursorGrokId === undefined
-        ? {}
-        : { cursorGrokId: cursorModelId(models.cursorGrokId, "models.cursorGrokId") }),
-    },
-    phases: {
-      pullRequest: booleanFlag(phases.pullRequest, "phases.pullRequest"),
-      requireCi: booleanFlag(phases.requireCi, "phases.requireCi"),
-      merge: booleanFlag(phases.merge, "phases.merge"),
-      productionCheck: booleanFlag(phases.productionCheck, "phases.productionCheck"),
-    },
-    review: {
-      maxLoops: positiveInteger(review.maxLoops, "review.maxLoops"),
-    },
-    checks: stringList(record.checks ?? [], "checks"),
-  };
-
-  if (typeof record.productionCheckCommand === "string" && record.productionCheckCommand.length > 0) {
-    config.productionCheckCommand = record.productionCheckCommand;
-  }
-
-  if (config.phases.requireCi && !config.phases.pullRequest) {
-    throw new Error("phases.requireCi を有効にするには phases.pullRequest も有効にしてください");
-  }
-  if (config.phases.merge && !config.phases.pullRequest) {
-    throw new Error("phases.merge を有効にするには phases.pullRequest も有効にしてください");
-  }
-  if (config.phases.productionCheck && !config.phases.merge) {
-    throw new Error("phases.productionCheck を有効にするには phases.merge も有効にしてください");
-  }
-  if (config.phases.productionCheck && !config.productionCheckCommand) {
-    throw new Error("phases.productionCheck を有効にするには productionCheckCommand が必要です");
-  }
-
+  const record = asRecord(raw, "設定"), models = asRecord(record.models, "models"), phases = asRecord(record.phases, "phases"), review = asRecord(record.review, "review");
+  const config: WorkflowConfig = { models: { smart: model(models.smart, "models.smart"), cheap: model(models.cheap, "models.cheap"), ...(models.cursorGrokId === undefined ? {} : { cursorGrokId: nonempty(models.cursorGrokId, "models.cursorGrokId") }) }, phases: { pullRequest: flag(phases.pullRequest, "phases.pullRequest"), requireCi: flag(phases.requireCi, "phases.requireCi"), merge: flag(phases.merge, "phases.merge"), productionCheck: flag(phases.productionCheck, "phases.productionCheck") }, review: { maxLoops: positive(review.maxLoops, "review.maxLoops") }, checks: list(record.checks ?? [], "checks") };
+  if (typeof record.productionCheckCommand === "string" && record.productionCheckCommand) config.productionCheckCommand = record.productionCheckCommand;
+  if (config.phases.requireCi && !config.phases.pullRequest) throw new Error("phases.requireCi requires phases.pullRequest");
+  if (config.phases.merge && !config.phases.pullRequest) throw new Error("phases.merge requires phases.pullRequest");
+  if (config.phases.productionCheck && !config.phases.merge) throw new Error("phases.productionCheck requires phases.merge");
+  if (config.phases.productionCheck && !config.productionCheckCommand) throw new Error("phases.productionCheck requires productionCheckCommand");
   return config;
 }
-
-function alias(value: unknown, label: string): ModelAlias {
-  if (typeof value === "string" && value in modelCatalog) {
-    return value as ModelAlias;
-  }
-  throw new Error(`${label} は ${Object.keys(modelCatalog).join(" / ")} のいずれかにしてください`);
+function model(value: unknown, label: string): ModelSpec {
+  if (typeof value === "string" && modelCatalog[value]) return { ...modelCatalog[value] };
+  const v = asRecord(value, label);
+  if (typeof v.provider !== "string" || !v.provider.trim()) throw new Error(`${label}.provider must be a non-empty string`);
+  if (typeof v.id !== "string" || !v.id.trim()) throw new Error(`${label}.id must be a non-empty string`);
+  if (v.effort !== undefined && (typeof v.effort !== "string" || !v.effort)) throw new Error(`${label}.effort must be a non-empty string`);
+  if (v.fast !== undefined && typeof v.fast !== "boolean") throw new Error(`${label}.fast must be boolean`);
+  if (v.contextWindow !== undefined && (typeof v.contextWindow !== "number" || !Number.isInteger(v.contextWindow) || v.contextWindow < 1)) throw new Error(`${label}.contextWindow must be a positive integer`);
+  return { ...v, provider: v.provider, id: v.id } as ModelSpec;
 }
-
-function cursorModelId(value: unknown, label: string): string {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value;
-  }
-  throw new Error(`${label} は空でない文字列にしてください`);
-}
-
-function booleanFlag(value: unknown, label: string): boolean {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  throw new Error(`${label} は true か false にしてください`);
-}
-
-function positiveInteger(value: unknown, label: string): number {
-  if (typeof value === "number" && Number.isInteger(value) && value >= 1) {
-    return value;
-  }
-  throw new Error(`${label} は 1 以上の整数にしてください`);
-}
-
-function stringList(value: unknown, label: string): string[] {
-  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
-    return value;
-  }
-  throw new Error(`${label} は文字列の配列にしてください`);
-}
-
-function asRecord(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} はオブジェクトにしてください`);
-  }
-  return value as Record<string, unknown>;
-}
+function nonempty(v: unknown, l: string): string { if (typeof v === "string" && v.trim()) return v; throw new Error(`${l} must be non-empty`); }
+function flag(v: unknown,l:string):boolean { if(typeof v==="boolean")return v; throw new Error(`${l} must be boolean`); }
+function positive(v:unknown,l:string):number { if(typeof v==="number"&&Number.isInteger(v)&&v>0)return v; throw new Error(`${l} must be a positive integer`); }
+function list(v:unknown,l:string):string[] { if(Array.isArray(v)&&v.every(x=>typeof x==="string"))return v; throw new Error(`${l} must be strings`); }
+function asRecord(v:unknown,l:string):Record<string, any> { if(typeof v!=="object"||v===null||Array.isArray(v))throw new Error(`${l} must be an object`); return v as Record<string, any>; }

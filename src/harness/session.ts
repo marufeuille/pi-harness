@@ -11,7 +11,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-import type { ModelAlias, ModelSpec } from "./models.ts";
+import type { ModelSpec } from "./models.ts";
 import { modelCatalog } from "./models.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -61,7 +61,7 @@ export async function runRole(options: {
   role: "smart" | "cheap";
   fixture?: OfflineFixture;
   stage?: string;
-  model: ModelAlias | ModelSpec;
+  model: ModelSpec;
   cwd: string;
   prompt: string;
   tools: string[];
@@ -79,7 +79,7 @@ export async function runRole(options: {
     }
     return call.text;
   }
-  const spec = typeof options.model === "string" ? modelCatalog[options.model] : options.model;
+  const spec = options.model;
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsStorePath: path.join(agentDir, "models-store.json"),
@@ -118,7 +118,7 @@ export async function runRole(options: {
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
     agentDir,
-    thinkingLevel: spec.thinking,
+    thinkingLevel: (spec.effort ?? "medium") as any,
     modelRuntime,
     resourceLoader,
     tools: options.tools,

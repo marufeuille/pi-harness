@@ -16,22 +16,18 @@ import { mergePullRequestWhenReady } from "./merge.ts";
 import { runGit } from "./worktrees.ts";
 import { runRole, toolsFor, type OfflineFixture } from "./session.ts";
 import { maskSecrets } from "./mask.ts";
-import { modelCatalog } from "./models.ts";
 
 const execFileAsync = promisify(execFile);
 
 export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixture): Steps {
   const smart = config.models.smart;
   const cheap = config.models.cheap;
-  const modelFor = (alias: typeof smart) => alias === "grok" && config.models.cursorGrokId
-    ? { ...modelCatalog.grok, id: config.models.cursorGrokId }
-    : alias;
 
   return {
     async clarify({ ticket, cwd }) {
       const text = await runRole({
         role: "smart", fixture, stage: "clarify",
-        model: modelFor(smart),
+        model: smart,
         cwd,
         tools: toolsFor("read"),
         prompt: [
@@ -57,7 +53,7 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
     async plan({ ticket, assumptions, cwd }) {
       const text = await runRole({
         role: "smart", fixture, stage: "plan",
-        model: modelFor(smart),
+        model: smart,
         cwd,
         tools: toolsFor("read"),
         prompt: [
@@ -85,7 +81,7 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
     async implement({ task, worktree, ticket }) {
       await runRole({
         role: "cheap", fixture, stage: "implement",
-        model: modelFor(cheap),
+        model: cheap,
         cwd: worktree.path,
         tools: toolsFor("edit"),
         prompt: [
@@ -106,7 +102,7 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
     async review({ ticket, plan, attempt, maxLoops, cwd, baseSha }) {
       const text = await runRole({
         role: "smart", fixture, stage: "review",
-        model: modelFor(smart),
+        model: smart,
         cwd,
         tools: toolsFor("read"),
         prompt: [
