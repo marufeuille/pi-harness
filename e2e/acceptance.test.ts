@@ -19,6 +19,10 @@ test("harness accepts clear and ambiguous tickets offline", async () => {
     await exec("git", ["init", repo]);
     await exec("git", ["-C", repo, "-c", "user.name=E2E", "-c", "user.email=e2e@example.invalid", "add", "."]);
     await exec("git", ["-C", repo, "-c", "user.name=E2E", "-c", "user.email=e2e@example.invalid", "commit", "-m", "initial"]);
+    const remote = path.join(repo, ".git", "origin.git");
+    await exec("git", ["init", "--bare", remote]);
+    await exec("git", ["-C", repo, "remote", "add", "origin", remote]);
+    await exec("git", ["-C", repo, "push", "-u", "origin", "main"]);
     const run = async (name: string, ticketText: string, calls: unknown[]) => {
       const ticket = path.join(temp, `${name}.md`);
       const fixture = path.join(temp, `${name}.json`);

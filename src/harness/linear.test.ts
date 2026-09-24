@@ -5,7 +5,10 @@ import { loadLinearTicket } from "./ticket.ts";
 import { runWorkflow } from "./workflow.ts";
 import type { Steps } from "./contract.ts";
 import type { WorkflowConfig } from "./config.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -55,6 +58,14 @@ test("Linear ID and URL preserve ticket content and enter the normal clarificati
     let calls = 0;
     const loaded = await loadLinearTicket(input);
     const repo = await mkdtemp(path.join(tmpdir(), "linear-workflow-"));
+    await execFileAsync("git", ["init", "-b", "main", repo]);
+    await writeFile(path.join(repo, "README.md"), "base\n");
+    await execFileAsync("git", ["-C", repo, "add", "."]);
+    await execFileAsync("git", ["-C", repo, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "init"]);
+    const remote = path.join(repo, ".git", "origin.git");
+    await execFileAsync("git", ["init", "--bare", remote]);
+    await execFileAsync("git", ["-C", repo, "remote", "add", "origin", remote]);
+    await execFileAsync("git", ["-C", repo, "push", "-u", "origin", "main"]);
     const sequence: string[] = [];
     try {
       const result = await runWorkflow({ repo, ticket: loaded, config: minimalConfig(), steps: workflowSteps({
