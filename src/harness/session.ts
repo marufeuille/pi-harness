@@ -16,6 +16,7 @@ import { modelCatalog } from "./models.ts";
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentDir = path.join(harnessRoot, ".pi-clean");
 const profilerPath = path.join(harnessRoot, "extensions", "profiler.ts");
+const cursorExtensionPath = path.join(harnessRoot, "node_modules", "pi-cursor-sdk", "dist", "index.js");
 
 const readOnlyTools = ["read", "grep", "find", "ls"];
 const editTools = ["read", "edit", "write", "grep", "find", "ls"];
@@ -57,11 +58,6 @@ export async function runRole(options: {
     modelsStorePath: path.join(agentDir, "models-store.json"),
     refreshOnCreate: false,
   });
-  const model = modelRuntime.getModel(spec.provider, spec.id);
-  if (!model) {
-    throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
-  }
-
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir,
@@ -69,12 +65,16 @@ export async function runRole(options: {
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    additionalExtensionPaths: [profilerPath],
+    additionalExtensionPaths: [profilerPath, cursorExtensionPath],
     systemPrompt:
       "あなたはハーネスから呼ばれた作業者です。渡された作業だけを行い、スキルの探索や関係ないツール追加はしないでください。",
     settingsManager: SettingsManager.inMemory(),
   });
   await resourceLoader.reload();
+  const model = modelRuntime.getModel(spec.provider, spec.id);
+  if (!model) {
+    throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
+  }
 
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
