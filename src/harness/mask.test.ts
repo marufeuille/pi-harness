@@ -50,11 +50,11 @@ test("masks JSON AWS secret keys and curl user credentials in every supported fo
     "curl --user alice:hunter2 https://example.com",
     "curl --user=alice:hunter2 https://example.com",
     "curl -u 'alice:my secret password' https://example.com",
-  ].join("\\n");
+  ].join("\n");
   const masked = maskSecrets(input);
   for (const secret of secrets) assert.ok(!masked.includes(secret), `secret remained: ${secret}`);
-  assert.match(masked, /curl --user \\[REDACTED\\]/);
-  assert.match(masked, /curl --user=\\[REDACTED\\]/);
+  assert.match(masked, /curl --user \[REDACTED\]/);
+  assert.match(masked, /curl --user=\[REDACTED\]/);
 });
 
 test("masks AWS environment variable assignments", () => {
@@ -66,5 +66,5 @@ test("masks quoted credentials in malformed JSON-like text", () => {
   const input = '{"api_key":"abc123", "access_token":"token123", "password":"hunter 2 rocks",';
   const masked = maskSecrets(input);
   for (const secret of ["abc123", "token123", "hunter 2 rocks"]) assert.ok(!masked.includes(secret));
-  assert.match(masked, /\[REDACTED\]/g);
+  assert.match(masked, /\[REDACTED\]/);
 });
