@@ -16,7 +16,7 @@ test("harness accepts clear and ambiguous tickets offline", async () => {
     const repo = path.join(temp, "repo");
     await mkdir(repo, { recursive: true });
     await writeFile(path.join(repo, "README.md"), "seed\n");
-    await exec("git", ["init", repo]);
+    await exec("git", ["init", "-b", "main", repo]);
     await exec("git", ["-C", repo, "-c", "user.name=E2E", "-c", "user.email=e2e@example.invalid", "add", "."]);
     await exec("git", ["-C", repo, "-c", "user.name=E2E", "-c", "user.email=e2e@example.invalid", "commit", "-m", "initial"]);
     const remote = path.join(repo, ".git", "origin.git");
