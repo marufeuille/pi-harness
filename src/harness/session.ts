@@ -119,7 +119,7 @@ export async function runRole(options: {
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
     agentDir,
-    thinkingLevel: (parameters.effort ?? "medium") as any,
+    thinkingLevel: parameters.effort as any,
     modelRuntime,
     resourceLoader,
     tools: options.tools,
@@ -155,7 +155,7 @@ export async function runRole(options: {
       ...model,
       ...(typeof parameters.contextWindow === "number" ? { contextWindow: parameters.contextWindow } : {}),
     });
-    await session.setThinkingLevel((parameters.effort ?? "medium") as any);
+    await session.setThinkingLevel(parameters.effort as any);
     const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
     const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
     if (!logCreated) {
