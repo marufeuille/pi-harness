@@ -24,7 +24,7 @@ export function toolsFor(role: "read" | "edit"): string[] {
   return role === "edit" ? editTools : readOnlyTools;
 }
 
-export type OfflineFixture = { calls: Array<{ stage: string; response: string; writes?: Record<string, string> }> ; index: number };
+export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }> }> ; index: number };
 
 export async function runRole(options: {
   role: "smart" | "cheap";
@@ -40,7 +40,7 @@ export async function runRole(options: {
     if (!call || call.stage !== options.stage) throw new Error(`固定応答の呼び出し段階が一致しません: ${options.stage}`);
     if (call.writes) {
       if (options.stage !== "implement") throw new Error("実装以外の段階では writes を指定できません");
-      for (const [relative, content] of Object.entries(call.writes)) {
+      for (const { path: relative, content } of call.writes) {
         if (path.isAbsolute(relative)) throw new Error("絶対パスへの書き込みは禁止されています");
         const target = path.resolve(options.cwd, relative);
         const rel = path.relative(options.cwd, target);
@@ -49,7 +49,7 @@ export async function runRole(options: {
         await fs.writeFile(target, content, "utf8");
       }
     }
-    return call.response;
+    return call.text;
   }
   const spec = modelCatalog[options.model];
   const modelRuntime = await ModelRuntime.create({
