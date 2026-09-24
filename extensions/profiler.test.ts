@@ -78,6 +78,35 @@ test("actual Pi tool call/result events log completed operations for both roles,
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
 });
 
+test("Cursor native operation lifecycle records completed actions, not starts", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "profiler-test-"));
+  const handlers = new Map<string, (event: any, ctx?: any) => Promise<void>>();
+  const pi = { on: (name: string, handler: (event: any, ctx?: any) => Promise<void>) => handlers.set(name, handler) } as any;
+  const secret = "cursor-native-secret-value";
+  try {
+    profiler(pi);
+    await handlers.get("session_start")!({}, { cwd });
+    for (const [id, operation, input] of [
+      ["read", "read_file", { path: "src/a.ts" }],
+      ["write", "write_file", { path: "src/b.ts" }],
+      ["cmd", "run_command", { command: `CURSOR_API_KEY=${secret} npm test` }],
+      ["search", "search", { pattern: "needle" }],
+    ] as const) {
+      await handlers.get("cursor_operation_start")!({ id, operation, input });
+    }
+    const logfile = path.join(cwd, ".pi-observability", fs.readdirSync(path.join(cwd, ".pi-observability"))[0]);
+    assert.equal(fs.readFileSync(logfile, "utf8").split("\n").length, 2);
+    for (const [id, result] of [["read", "contents"], ["write", "written"], ["cmd", "passed"], ["search", "matches"]]) {
+      await handlers.get("cursor_operation_end")!({ id, result, isError: false });
+    }
+    const text = fs.readFileSync(logfile, "utf8");
+    const records = text.trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(records.filter((record) => record.type === "tool").length, 4);
+    assert.ok(text.includes("src/a.ts") && text.includes("src/b.ts") && text.includes("needle") && text.includes("npm test"));
+    assert.ok(!text.includes(secret));
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
+});
+
 test("SDK-shaped tool events record sizes and duplicate counts by input", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "profiler-test-"));
   const handlers = new Map<string, (event: any, ctx?: any) => Promise<void>>();
