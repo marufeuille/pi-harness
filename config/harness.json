@@ -1,0 +1,16 @@
+{
+  "models": {
+    "smart": "astra",
+    "cheap": "grok"
+  },
+  "phases": {
+    "pullRequest": false,
+    "requireCi": false,
+    "merge": false,
+    "productionCheck": false
+  },
+  "review": {
+    "maxLoops": 3
+  },
+  "checks": []
+}

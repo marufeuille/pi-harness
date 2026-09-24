@@ -1,0 +1,20 @@
+{
+  "name": "pi-harness-playground",
+  "version": "1.0.0",
+  "description": "Markdown ticket workflow on top of Pi",
+  "scripts": {
+    "test": "node --import tsx --test src/harness/contract.test.ts src/harness/schedule.test.ts src/harness/config.test.ts src/harness/workflow.test.ts",
+    "harness": "tsx src/harness/main.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
