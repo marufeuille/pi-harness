@@ -9,6 +9,7 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 
 import type { ModelSpec } from "./models.ts";
@@ -17,6 +18,7 @@ import { modelCatalog, registerRuntimeModel, resolveAndValidateModel } from "./m
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentDir = path.join(harnessRoot, ".pi-clean");
 const profilerPath = path.join(harnessRoot, "extensions", "profiler.ts");
+const editUniquenessPath = path.join(harnessRoot, "extensions", "edit-uniqueness.ts");
 const cursorExtensionPath = path.join(harnessRoot, "node_modules", "pi-cursor-sdk", "dist", "index.js");
 
 const readOnlyTools = ["read", "grep", "find", "ls"];
@@ -93,30 +95,23 @@ export function modelForFastParameter<T extends { provider: string; id: string }
 
 export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }> }> ; index: number };
 
-export async function runRole(options: {
-  role: "smart" | "cheap";
-  fixture?: OfflineFixture;
-  stage?: string;
-  model: ModelSpec;
+export type HarnessExtensionsResult = {
+  extensions: Array<{ path: string }>;
+  errors: Array<{ error: unknown }>;
+};
+
+export function requireLoadedExtension(extensionsResult: HarnessExtensionsResult, fileName: string): void {
+  const loaded = extensionsResult.extensions.some((extension) => extension.path.includes(fileName));
+  if (loaded) return;
+  const errors = extensionsResult.errors.map((error) => String(error.error)).join("\n");
+  throw new Error(`${fileName.replace(/\.ts$/, "")} が読み込まれていません\n${errors}`);
+}
+
+export async function createHarnessSession(options: {
   cwd: string;
-  prompt: string;
   tools: string[];
-}): Promise<string> {
-  if (options.fixture) {
-    const call = options.fixture.calls[options.fixture.index++];
-    if (!call || call.stage !== options.stage) throw new Error(`固定応答の呼び出し段階が一致しません: ${options.stage}`);
-    if (call.writes) {
-      if (options.stage !== "implement") throw new Error("実装以外の段階では writes を指定できません");
-      for (const { path: relative, content } of call.writes) {
-        const target = assertWriteAllowed("edit", options.cwd, relative);
-        await fs.mkdir(path.dirname(target), { recursive: true });
-        await fs.writeFile(target, content, "utf8");
-      }
-    }
-    return call.text;
-  }
-  const spec = options.model;
-  const parameters = spec.parameters ?? {};
+  thinkingLevel?: string;
+}): Promise<{ session: AgentSession; modelRuntime: ModelRuntime }> {
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsStorePath: path.join(agentDir, "models-store.json"),
@@ -141,7 +136,7 @@ export async function runRole(options: {
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    additionalExtensionPaths: [profilerPath, cursorExtensionPath],
+    additionalExtensionPaths: [profilerPath, editUniquenessPath, cursorExtensionPath],
     systemPrompt:
       "あなたはハーネスから呼ばれた作業者です。渡された作業だけを行い、スキルの探索や関係ないツール追加はしないでください。",
     settingsManager: SettingsManager.inMemory(),
@@ -155,7 +150,7 @@ export async function runRole(options: {
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
     agentDir,
-    thinkingLevel: parameters.effort as any,
+    thinkingLevel: options.thinkingLevel as any,
     modelRuntime,
     resourceLoader,
     tools: options.tools,
@@ -163,21 +158,57 @@ export async function runRole(options: {
     settingsManager: SettingsManager.inMemory(),
   });
 
-  const profilerLoaded = extensionsResult.extensions.some((extension) =>
-    extension.path.includes("profiler.ts"),
-  );
-  if (!profilerLoaded) {
-    const errors = extensionsResult.errors.map((error) => error.error).join("\n");
-    session.dispose();
-    throw new Error(`profiler が読み込まれていません\n${errors}`);
-  }
-
   try {
+    requireLoadedExtension(extensionsResult, "profiler.ts");
+    requireLoadedExtension(extensionsResult, "edit-uniqueness.ts");
     // Binding extensions dispatches session_start. Do not prompt until the
     // profiler's synchronous session_start handler has created its log.
     const observabilityDir = path.join(options.cwd, ".pi-observability");
     const before = new Set(await fs.readdir(observabilityDir).catch(() => [] as string[]));
     await session.bindExtensions({});
+    const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
+    const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
+    if (!logCreated) {
+      throw new Error("profiler のログファイルを作成できませんでした");
+    }
+  } catch (error) {
+    session.dispose();
+    throw error;
+  }
+  return { session, modelRuntime };
+}
+
+export async function runRole(options: {
+  role: "smart" | "cheap";
+  fixture?: OfflineFixture;
+  stage?: string;
+  model: ModelSpec;
+  cwd: string;
+  prompt: string;
+  tools: string[];
+}): Promise<string> {
+  if (options.fixture) {
+    const call = options.fixture.calls[options.fixture.index++];
+    if (!call || call.stage !== options.stage) throw new Error(`固定応答の呼び出し段階が一致しません: ${options.stage}`);
+    if (call.writes) {
+      if (options.stage !== "implement") throw new Error("実装以外の段階では writes を指定できません");
+      for (const { path: relative, content } of call.writes) {
+        const target = assertWriteAllowed("edit", options.cwd, relative);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, content, "utf8");
+      }
+    }
+    return call.text;
+  }
+  const spec = options.model;
+  const parameters = spec.parameters ?? {};
+  const { session, modelRuntime } = await createHarnessSession({
+    cwd: options.cwd,
+    tools: options.tools,
+    thinkingLevel: parameters.effort as string | undefined,
+  });
+
+  try {
     // Extensions register providers during binding; resolve only after that
     // registration queue has been applied to the runtime.
     const found = modelRuntime.getModel(spec.provider, spec.id);
@@ -204,11 +235,6 @@ export async function runRole(options: {
       throw new Error(`モデルが effort ${String(activeParameters.effort)} をサポートしていません`);
     }
     if (activeParameters.effort !== undefined) await session.setThinkingLevel(activeParameters.effort as any);
-    const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
-    const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
-    if (!logCreated) {
-      throw new Error("profiler のログファイルを作成できませんでした");
-    }
 
     // PromptOptions in SDK 0.87.1 does not forward provider stream options.
     // Apply validated parameters at the ModelRuntime boundary used by the SDK (models have no stream()).
