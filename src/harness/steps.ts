@@ -9,10 +9,12 @@ import {
   parseReview,
   type ProductionCheck,
   type PullRequest,
+  type JsonReadFailure,
   type Steps,
 } from "./contract.ts";
 import { runGit } from "./worktrees.ts";
 import { runRole, toolsFor } from "./session.ts";
+import { maskSecrets } from "./mask.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,7 +45,8 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
           ticket.body,
         ].join("\n"),
       });
-      return parseClarification(parseJsonBlock(text));
+      const value = readJson(text, "clarify", 1);
+      return "decision" in value && value.decision === "json_read_failure" ? value : parseClarification(value);
     },
 
     async plan({ ticket, assumptions, cwd }) {
@@ -70,7 +73,8 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
           ticket.body,
         ].join("\n"),
       });
-      return parsePlan(parseJsonBlock(text));
+      const value = readJson(text, "plan", 1);
+      return "decision" in value && value.decision === "json_read_failure" ? value : parsePlan(value);
     },
 
     async implement({ task, worktree, ticket }) {
@@ -125,7 +129,8 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
           ticket.body,
         ].join("\n"),
       });
-      return parseReview(parseJsonBlock(text));
+      const value = readJson(text, "review", attempt);
+      return "decision" in value && value.decision === "json_read_failure" ? value : parseReview(value);
     },
 
     async openPullRequest({ cwd, title, baseBranch, headBranch, assumptions, concerns }) {
@@ -170,6 +175,14 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
       }
     },
   };
+}
+
+function readJson(text: string, stage: JsonReadFailure["stage"], attempt: number): unknown | JsonReadFailure {
+  try {
+    return parseJsonBlock(text);
+  } catch {
+    return { decision: "json_read_failure", stage, attempt, text: maskSecrets(text) };
+  }
 }
 
 function pullRequestFromUrl(url: string): PullRequest {
