@@ -18,7 +18,7 @@ export type Plan = {
   tasks: Task[];
 } | JsonReadFailure;
 
-export type JsonReadFailure = { decision: "json_read_failure"; stage: "clarify" | "plan" | "review"; attempt: number; text: string };
+export type JsonReadFailure = { decision: "json-read-failed"; stage: "clarify" | "plan" | "review"; attempt: number; text: string };
 
 export type Clarification =
   | { decision: "proceed"; assumptions: string[] }

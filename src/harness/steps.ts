@@ -46,7 +46,7 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
         ].join("\n"),
       });
       const value = readJson(text, "clarify", 1);
-      return "decision" in value && value.decision === "json_read_failure" ? value : parseClarification(value);
+      return "decision" in value && value.decision === "json-read-failed" ? value : parseClarification(value);
     },
 
     async plan({ ticket, assumptions, cwd }) {
@@ -74,7 +74,7 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
         ].join("\n"),
       });
       const value = readJson(text, "plan", 1);
-      return "decision" in value && value.decision === "json_read_failure" ? value : parsePlan(value);
+      return "decision" in value && value.decision === "json-read-failed" ? value : parsePlan(value);
     },
 
     async implement({ task, worktree, ticket }) {
@@ -130,7 +130,7 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
         ].join("\n"),
       });
       const value = readJson(text, "review", attempt);
-      return "decision" in value && value.decision === "json_read_failure" ? value : parseReview(value);
+      return "decision" in value && value.decision === "json-read-failed" ? value : parseReview(value);
     },
 
     async openPullRequest({ cwd, title, baseBranch, headBranch, assumptions, concerns }) {
@@ -181,7 +181,7 @@ function readJson(text: string, stage: JsonReadFailure["stage"], attempt: number
   try {
     return parseJsonBlock(text);
   } catch {
-    return { decision: "json_read_failure", stage, attempt, text: maskSecrets(text) };
+    return { decision: "json-read-failed", stage, attempt, text: maskSecrets(text) };
   }
 }
 
