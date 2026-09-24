@@ -181,6 +181,10 @@ test("各段階の profiler jsonl を段階名とファイル名を保って保�
     expected.set(label, { cwd, name, content });
   };
   try {
+    const oldDirectory = path.join(repo, ".pi-observability");
+    await mkdir(oldDirectory, { recursive: true });
+    await writeFile(path.join(oldDirectory, "old.jsonl"), "old");
+    await writeFile(path.join(oldDirectory, "notes.txt"), "not a log");
     const result = await runWorkflow({
       repo,
       ticketPath: await writeTicket(),
@@ -204,9 +208,10 @@ test("各段階の profiler jsonl を段階名とファイル名を保って保�
     assert.equal(result.status, "ready");
     for (const [label, log] of expected) {
       const archived = path.join(result.runDir, "observability", label);
-      assert.ok((await readdir(archived)).includes(log.name));
+      assert.deepEqual(await readdir(archived), [log.name]);
       assert.equal(await readFile(path.join(archived, log.name), "utf8"), log.content);
     }
+    assert.deepEqual(await readdir(path.join(result.runDir, "observability", "clarify")), ["clarify.jsonl"]);
     const taskLog = expected.get("feature");
     assert.ok(taskLog);
     await assert.rejects(readdir(taskLog.cwd));

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { maskSecrets } from "../src/harness/mask.ts";
 
 import type {
   ExtensionAPI,
@@ -11,6 +12,7 @@ type ActiveCall = {
   startedAt: number;
   inputChars: number;
   inputHash: string;
+  target: string;
 };
 
 type ToolLog = {
@@ -28,6 +30,7 @@ type ToolLog = {
   duplicateInputCount: number;
 
   isError: boolean;
+  errorOutput?: string;
 };
 
 function sizeOf(value: unknown): number {
@@ -40,6 +43,24 @@ function sizeOf(value: unknown): number {
   } catch {
     return String(value).length;
   }
+}
+
+const MAX_CHARS = 500;
+
+function safeText(value: unknown, limit = MAX_CHARS): string {
+  let text: string;
+  try { text = typeof value === "string" ? value : JSON.stringify(value) ?? String(value); }
+  catch { text = String(value); }
+  return maskSecrets(text).slice(0, limit);
+}
+
+function targetOf(tool: string, input: unknown): string {
+  const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const keys = /read|write|edit|bash|command|grep|search|find/i.test(tool);
+  const preferred = /bash|command/i.test(tool) ? ["command", "cmd"] : /grep|search|find/i.test(tool) ? ["pattern", "query"] : ["path", "file_path", "filePath", "command", "pattern"];
+  if (!keys) return "";
+  const key = preferred.find((name) => args[name] !== undefined);
+  return key ? safeText(args[key]) : "";
 }
 
 function hash(value: unknown): string {
@@ -79,6 +100,19 @@ export default function profiler(pi: ExtensionAPI) {
   const seenInputs = new Map<string, number>();
 
   let logFile: string | undefined;
+  const sessionSecrets = new Set<string>();
+
+  function redact(value: unknown, limit = MAX_CHARS): string {
+    let raw: string;
+    try { raw = typeof value === "string" ? value : JSON.stringify(value) ?? String(value); }
+    catch { raw = String(value); }
+    for (const match of raw.matchAll(/(?:AWS_SECRET_ACCESS_KEY|[A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET_KEY|TOKEN|PASSWORD))\s*[:=]\s*["']?([^\s"',;]+)/gi)) {
+      if (match[1] && match[1].length >= 3) sessionSecrets.add(match[1]);
+    }
+    let text = maskSecrets(raw);
+    for (const secret of sessionSecrets) text = text.split(secret).join("[REDACTED]");
+    return text.slice(0, limit);
+  }
 
   function write(record: unknown) {
     if (!logFile) {
@@ -94,7 +128,7 @@ export default function profiler(pi: ExtensionAPI) {
   /*
    * セッション開始時にログファイルを作る
    */
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     const dir = path.join(
       ctx.cwd,
       ".pi-observability",
@@ -116,7 +150,8 @@ export default function profiler(pi: ExtensionAPI) {
     write({
       timestamp: new Date().toISOString(),
       type: "session_start",
-      cwd: ctx.cwd,
+      cwd: safeText(ctx.cwd),
+      model: safeText((event as any)?.model ?? (ctx as any)?.model ?? "unknown"),
     });
 
     console.error(
@@ -142,6 +177,8 @@ export default function profiler(pi: ExtensionAPI) {
       duplicateInputCount,
     );
 
+    redact(event.input);
+
     active.set(
       event.toolCallId,
       {
@@ -149,6 +186,7 @@ export default function profiler(pi: ExtensionAPI) {
         startedAt: performance.now(),
         inputChars,
         inputHash,
+        target: redact(targetOf(event.toolName, event.input)),
       },
     );
   });
@@ -191,6 +229,8 @@ export default function profiler(pi: ExtensionAPI) {
       duplicateInputCount,
 
       isError: event.isError ?? false,
+      target: current.target,
+      ...(event.isError ? { errorOutput: redact((event as any).content?.map?.((item: any) => item.text ?? "").join("\n") ?? event.content) } : {}),
     };
 
     write(record);
@@ -201,10 +241,18 @@ export default function profiler(pi: ExtensionAPI) {
   /*
    * 1回のagent run終了
    */
-  pi.on("agent_end", async () => {
+  pi.on("agent_end", async (event) => {
+    const messages = (event as any)?.messages;
+    const last = Array.isArray(messages)
+      ? [...messages].reverse().find((message: any) => message?.role === "assistant")
+      : undefined;
+    const text = typeof last?.content === "string" ? last.content : Array.isArray(last?.content)
+      ? last.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n")
+      : "";
     write({
       timestamp: new Date().toISOString(),
       type: "agent_end",
+      assistantText: redact(text, Number.POSITIVE_INFINITY),
     });
   });
 
