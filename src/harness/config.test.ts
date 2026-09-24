@@ -12,11 +12,7 @@ const base = { phases: { pullRequest: false, requireCi: false, merge: false, pro
 test("明示されたモデル指定と既定別名は parameters 形式になる", async () => {
   const config = await loadConfig(path.join(harnessRoot, "config", "harness.json"));
   assert.deepEqual(config.models.smart, modelCatalog.astra);
-  assert.deepEqual(config.models.cheap, {
-    provider: "cursor",
-    id: "grok-4.6",
-    parameters: { effort: "xhigh", fast: false },
-  });
+  assert.deepEqual(config.models.cheap, modelCatalog.grok);
   for (const alias of ["astra", "luna", "grok", "fable"] as const) {
     const explicit = parseConfig({ ...base, models: { smart: modelCatalog[alias], cheap: modelCatalog[alias] } });
     assert.deepEqual(explicit.models.smart, modelCatalog[alias]);
