@@ -191,36 +191,9 @@ export default function profiler(pi: ExtensionAPI) {
     );
   });
 
-  // Cursor provider emits operation lifecycle events separately from Pi tool
-  // calls. Record only completed operations: a start notification is not proof
-  // that the operation succeeded.
-  pi.on("cursor_operation_start" as any, async (event: any) => {
-    const id = String(event.operationId ?? event.id ?? crypto.randomUUID());
-    const operation = String(event.operation ?? event.operationType ?? event.type ?? "operation");
-    const target = redact(event.path ?? event.command ?? event.pattern ?? event.target ?? "");
-    active.set(`cursor:${id}`, {
-      toolName: `cursor:${operation}`,
-      startedAt: performance.now(),
-      inputChars: sizeOf(event),
-      inputHash: hash(event),
-      target,
-    });
-  });
-
-  pi.on("cursor_operation_end" as any, async (event: any) => {
-    const id = String(event.operationId ?? event.id ?? "");
-    const key = `cursor:${id}`;
-    const current = active.get(key);
-    if (!current) return;
-    write({
-      timestamp: new Date().toISOString(), type: "operation",
-      operation: current.toolName.slice("cursor:".length), target: current.target,
-      durationMs: Math.round(performance.now() - current.startedAt),
-      isError: Boolean(event.isError ?? event.error),
-    });
-    active.delete(key);
-  });
-
+  // Cursor's native operations are outside Pi's tool event stream. Log the
+  // actual Pi tool calls and their results; a successful result is the
+  // completion signal (never treat a call/start notification as success).
   /*
    * Tool実行後
    */
@@ -259,6 +232,7 @@ export default function profiler(pi: ExtensionAPI) {
       duplicateInputCount,
 
       isError: event.isError ?? false,
+      operation: current.toolName,
       target: current.target,
       ...(event.isError ? { errorOutput: redact((event as any).content?.map?.((item: any) => item.text ?? "").join("\n") ?? event.content) } : {}),
     };
