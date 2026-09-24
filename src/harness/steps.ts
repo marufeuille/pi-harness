@@ -13,19 +13,19 @@ import {
   type Steps,
 } from "./contract.ts";
 import { runGit } from "./worktrees.ts";
-import { runRole, toolsFor } from "./session.ts";
+import { runRole, toolsFor, type OfflineFixture } from "./session.ts";
 import { maskSecrets } from "./mask.ts";
 
 const execFileAsync = promisify(execFile);
 
-export function createDefaultSteps(config: WorkflowConfig): Steps {
+export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixture): Steps {
   const smart = config.models.smart;
   const cheap = config.models.cheap;
 
   return {
     async clarify({ ticket, cwd }) {
       const text = await runRole({
-        role: "smart",
+        role: "smart", fixture, stage: "clarify",
         model: smart,
         cwd,
         tools: toolsFor("read"),
@@ -51,7 +51,7 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
 
     async plan({ ticket, assumptions, cwd }) {
       const text = await runRole({
-        role: "smart",
+        role: "smart", fixture, stage: "plan",
         model: smart,
         cwd,
         tools: toolsFor("read"),
@@ -79,7 +79,7 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
 
     async implement({ task, worktree, ticket }) {
       await runRole({
-        role: "cheap",
+        role: "cheap", fixture, stage: "implement",
         model: cheap,
         cwd: worktree.path,
         tools: toolsFor("edit"),
@@ -100,7 +100,7 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
 
     async review({ ticket, plan, attempt, maxLoops, cwd, baseSha }) {
       const text = await runRole({
-        role: "smart",
+        role: "smart", fixture, stage: "review",
         model: smart,
         cwd,
         tools: toolsFor("read").concat("bash"),
