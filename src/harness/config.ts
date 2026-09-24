@@ -80,10 +80,10 @@ function alias(value: unknown, label: string): ModelAlias {
 }
 
 function cursorModelId(value: unknown, label: string): string {
-  if (typeof value === "string" && /^cursor\/[a-z0-9][a-z0-9._-]*$/i.test(value)) {
+  if (typeof value === "string" && value.trim().length > 0) {
     return value;
   }
-  throw new Error(`${label} は cursor/<model-id> 形式にしてください`);
+  throw new Error(`${label} は空でない文字列にしてください`);
 }
 
 function booleanFlag(value: unknown, label: string): boolean {
