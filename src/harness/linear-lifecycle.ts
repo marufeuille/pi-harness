@@ -18,9 +18,12 @@ export async function runLinearLifecycle<T extends WorkflowResult>(options: {
   issueId: string;
   updateLinearIssueState: StateUpdater;
   runWorkflow: () => Promise<T>;
+  resume?: boolean;
 }): Promise<{ ok: true; result: T } | { ok: false; reason: string }> {
-  const started = await options.updateLinearIssueState(options.issueId, "In Progress");
-  if (!started.ok) return started;
+  if (!options.resume) {
+    const started = await options.updateLinearIssueState(options.issueId, "In Progress");
+    if (!started.ok) return started;
+  }
   const result = await options.runWorkflow();
   if (result.status !== "ready" && result.status !== "production-ok") return { ok: true, result };
   const completed = await options.updateLinearIssueState(options.issueId, "Done");

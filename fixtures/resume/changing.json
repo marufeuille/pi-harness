@@ -1,0 +1,18 @@
+{
+  "first": {
+    "calls": [
+      { "stage": "clarify", "text": "{\"decision\":\"proceed\",\"assumptions\":[]}" },
+      { "stage": "plan", "text": "{\"assumptions\":[],\"tasks\":[{\"id\":\"T1\",\"title\":\"Add greeting\",\"instructions\":\"Add hello.txt containing hello\",\"dependsOn\":[]}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "hello.txt", "content": "hello\n" }] },
+      { "stage": "implement", "text": "" },
+      { "stage": "implement", "text": "" },
+      { "stage": "review", "text": "{\"decision\":\"fix\",\"issues\":[{\"id\":\"still\",\"title\":\"still\",\"dependsOn\":[],\"instructions\":\"still\"}]}" }
+    ]
+  },
+  "resume": {
+    "calls": [
+      { "stage": "implement", "text": "" },
+      { "stage": "review", "text": "{\"decision\":\"pass\",\"concerns\":[\"フレークしうる\"]}" }
+    ]
+  }
+}

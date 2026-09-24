@@ -104,17 +104,28 @@ export async function openIntegrationWorktree(repo: string, runId: string, baseS
   return { path: worktreePath, branch };
 }
 
+export function taskWorktree(repo: string, runId: string, taskId: string): Worktree {
+  return {
+    path: path.join(runDirectory(repo, runId), "tasks", taskId),
+    branch: `harness/${runId}/task/${taskId}`,
+  };
+}
+
+export function taskIdFromBranch(runId: string, branch: string): string | undefined {
+  const prefix = `harness/${runId}/task/`;
+  return branch.startsWith(prefix) ? branch.slice(prefix.length) : undefined;
+}
+
 export async function openTaskWorktree(
   repo: string,
   runId: string,
   taskId: string,
   baseBranch: string,
 ): Promise<Worktree> {
-  const branch = `harness/${runId}/task/${taskId}`;
-  const worktreePath = path.join(runDirectory(repo, runId), "tasks", taskId);
-  await mkdir(path.dirname(worktreePath), { recursive: true });
-  await runGit(repo, ["worktree", "add", "-b", branch, worktreePath, baseBranch]);
-  return { path: worktreePath, branch };
+  const worktree = taskWorktree(repo, runId, taskId);
+  await mkdir(path.dirname(worktree.path), { recursive: true });
+  await runGit(repo, ["worktree", "add", "-b", worktree.branch, worktree.path, baseBranch]);
+  return worktree;
 }
 
 export async function currentBranch(cwd: string): Promise<string> {
@@ -179,24 +190,39 @@ export async function mergeBranch(integration: Worktree, branch: string): Promis
   );
 }
 
-export async function continueMerge(integration: Worktree): Promise<MergeResult> {
+export type PendingMerge =
+  | { pending: false }
+  | { pending: true; sourceBranch: string; conflicts: string[] };
+
+export async function inspectPendingMerge(integration: Worktree): Promise<PendingMerge> {
   const mergeHead = await runGitResult(integration.path, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
-  const sourceBranch = (await mergeSourceBranch(integration.path)) ?? "";
   if (mergeHead.code !== 0) {
+    return { pending: false };
+  }
+  return {
+    pending: true,
+    sourceBranch: (await mergeSourceBranch(integration.path)) ?? "",
+    conflicts: await unmergedPaths(integration.path),
+  };
+}
+
+export async function continueMerge(integration: Worktree): Promise<MergeResult> {
+  const pending = await inspectPendingMerge(integration);
+  if (!pending.pending) {
     return {
       ok: false,
       reason: "取り込みは進行中ではありません",
       kind: "error",
       conflicts: [],
-      source: { branch: sourceBranch },
+      source: { branch: "" },
       destination: { path: integration.path, branch: integration.branch },
     };
   }
 
-  const conflicts = await unmergedPaths(integration.path);
-  if (conflicts.length > 0) {
-    return ingestFailure(integration, sourceBranch, "衝突が残っています", conflicts);
+  if (pending.conflicts.length > 0) {
+    return ingestFailure(integration, pending.sourceBranch, "衝突が残っています", pending.conflicts);
   }
+  const sourceBranch = pending.sourceBranch;
 
   const continued = await runGitResult(integration.path, [...identity, "commit", "--no-edit"]);
   if (continued.code === 0) {

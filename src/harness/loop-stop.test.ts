@@ -10,6 +10,7 @@ import {
   formatIssues,
   isEnvironmentCheckFailure,
   kindForIssueLimit,
+  makeStopSnapshot,
   recommendationFor,
 } from "./loop-stop.ts";
 
@@ -73,4 +74,23 @@ test("停止種類ごとの推奨と再開手段が仕様どおり", () => {
   assert.equal(kindForIssueLimit("shifted"), "changing");
   assert.match(formatIssues([issue("fix-a", "空白を拒否する")]), /fix-a/);
   assert.equal(checkFixTask(2, "boom").id, "checks-2");
+  const conflict = makeStopSnapshot({
+    kind: "conflict",
+    lastOutput: "衝突",
+    trend: "same",
+    branch: "harness/run/integration",
+    worktree: "/tmp/integration",
+    conflicts: ["shared.txt"],
+  });
+  assert.deepEqual(conflict.conflicts, ["shared.txt"]);
+  assert.equal(typeof conflict.recommendation, "string");
+  assert.equal(conflict.recommendation.includes("\n"), false);
+  assert.equal(makeStopSnapshot({
+    kind: "stalled",
+    lastOutput: "同じ",
+    trend: "same",
+    branch: "b",
+    worktree: "w",
+    conflicts: ["ignored"],
+  }).conflicts, undefined);
 });

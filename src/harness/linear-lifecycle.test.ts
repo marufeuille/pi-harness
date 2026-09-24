@@ -57,3 +57,34 @@ test("workflow exceptions do not trigger completion or rollback", async () => {
   await assert.rejects(runLinearLifecycle({ issueId: "X", updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; }, runWorkflow: async () => { throw new Error("failed"); } }), /failed/);
   assert.deepEqual(calls, ["In Progress"]);
 });
+
+test("resume keeps In Progress and still completes only on ready or production-ok", async () => {
+  const calls: string[] = [];
+  const stopped = await runLinearLifecycle({
+    issueId: "ABC-1",
+    resume: true,
+    updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; },
+    runWorkflow: async () => result("escalated"),
+  });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(stopped, { ok: true, result: result("escalated") });
+
+  const ready = await runLinearLifecycle({
+    issueId: "ABC-1",
+    resume: true,
+    updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; },
+    runWorkflow: async () => result("ready"),
+  });
+  assert.deepEqual(calls, ["Done"]);
+  assert.equal(ready.ok, true);
+
+  calls.length = 0;
+  const returned = await runLinearLifecycle({
+    issueId: "ABC-1",
+    resume: true,
+    updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; },
+    runWorkflow: async () => result("returned"),
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(returned.ok, true);
+});
