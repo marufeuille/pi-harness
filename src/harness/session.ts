@@ -82,7 +82,7 @@ export async function runRole(options: {
     // profiler's synchronous session_start handler has created its log.
     const observabilityDir = path.join(options.cwd, ".pi-observability");
     const before = new Set(await fs.readdir(observabilityDir).catch(() => [] as string[]));
-    await session.bindExtensions();
+    await session.bindExtensions({});
     const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
     const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
     if (!logCreated) {
