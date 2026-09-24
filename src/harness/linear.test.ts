@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadLinearIssue } from "./linear.ts";
+import { loadLinearIssue, updateLinearIssueState } from "./linear.ts";
 import { loadLinearTicket } from "./ticket.ts";
 import { runWorkflow } from "./workflow.ts";
 import type { Steps } from "./contract.ts";
@@ -42,7 +42,7 @@ test("reports safe failure categories", async () => {
   assert.deepEqual(await run(200, { data: { issue: null } }), { ok: false, reason: "not_found" });
   assert.deepEqual(await run(200, { data: { issue: { title: "T", description: " \n" } } }), { ok: false, reason: "empty_body" });
   assert.deepEqual(await loadLinearIssue("ABC-1", { apiKey: "token", fetch: async () => { throw Error("secret"); } }), { ok: false, reason: "communication" });
-  assert.deepEqual(await loadLinearIssue("ABC-1", { fetch: async () => response(200, issue) }), { ok: false, reason: "authentication" });
+  assert.deepEqual(await loadLinearIssue("ABC-1", { apiKey: "", fetch: async () => response(200, issue) }), { ok: false, reason: "authentication" });
 });
 
 test("Linear ID and URL preserve ticket content and enter the normal clarification sequence", async () => {
@@ -89,6 +89,49 @@ test("Linear retrieval failure and empty body prevent workflow entry", async () 
     if (originalKey === undefined) delete process.env.LINEAR_API_KEY;
     else process.env.LINEAR_API_KEY = originalKey;
   }
+});
+
+test("updates only state resolved from the issue's own team", async () => {
+  for (const stateName of ["In Progress", "Done"] as const) {
+    const requests: unknown[] = [];
+    let calls = 0;
+    await updateLinearIssueState("ABC-1", stateName, { apiKey: "secret", fetch: async (_url, init) => {
+      calls++; const body = JSON.parse(String(init?.body)); requests.push(body);
+      return calls === 1
+        ? response(200, { data: { issue: { id: "issue-id", team: { id: "team-id", states: { nodes: [{ id: "wrong", name: "Other" }, { id: `state-${stateName}`, name: stateName }] } } } } })
+        : response(200, { data: { issueUpdate: { success: true } } });
+    } });
+    const stateQuery = requests[0] as { query: string; variables: Record<string, string> };
+    assert.match(stateQuery.query, /team\s*\{\s*id\s+states\s*\{\s*nodes\s*\{\s*id\s+name\s*\}\s*\}\s*\}/);
+    let braceBalance = 0;
+    for (const character of stateQuery.query) {
+      if (character === "{") braceBalance++;
+      if (character === "}") braceBalance--;
+      assert.ok(braceBalance >= 0, "query closes a brace before opening it");
+    }
+    assert.equal(braceBalance, 0, "entire GraphQL query must have balanced braces");
+    assert.doesNotMatch(stateQuery.query, /workflowStates/);
+    assert.deepEqual(stateQuery.variables, { id: "ABC-1" });
+    const mutation = requests[1] as { query: string; variables: Record<string, string> };
+    assert.deepEqual(mutation.variables, { id: "issue-id", stateId: `state-${stateName}` });
+    assert.match(mutation.query, /stateId: \$stateId/);
+    assert.doesNotMatch(mutation.query, /title|description|comment|create/i);
+  }
+});
+
+test("rejects missing and ambiguous states and failed updates safely", async () => {
+  const run = (nodes: unknown[], update: unknown = { success: true }) => {
+    let calls = 0;
+    return updateLinearIssueState("ABC-1", "Done", { apiKey: "secret", fetch: async () => {
+      calls++;
+      return response(200, calls === 1 ? { data: { issue: { id: "i", team: { states: { nodes } } } } } : { data: { issueUpdate: update } });
+    } });
+  };
+  await assert.rejects(run([]), /state_not_found/);
+  await assert.rejects(run([{ id: "1", name: "Done" }, { id: "2", name: "Done" }]), /ambiguous_state/);
+  await assert.rejects(run([{ id: "1", name: "Done" }], { success: false }), /update_failed/);
+  await assert.rejects(updateLinearIssueState("ABC-1", "Done", { apiKey: "secret", fetch: async () => response(403, {}) }), /permission/);
+  await assert.rejects(updateLinearIssueState("ABC-1", "Done", { apiKey: "secret", fetch: async () => { throw Error("secret"); } }), /communication/);
 });
 
 test("rejects non-Linear URLs before making a request", async () => {
