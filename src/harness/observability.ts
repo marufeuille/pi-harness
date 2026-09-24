@@ -1,20 +1,18 @@
-import { copyFile, mkdir, readdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 
-export async function archiveProfilerLogs(cwd: string, destination: string, since: number): Promise<void> {
+export async function profilerLogFiles(cwd: string): Promise<Set<string>> {
   const source = path.join(cwd, ".pi-observability");
   const names = await readdir(source).catch(() => []);
+  return new Set(names.filter((name) => name.endsWith(".jsonl")));
+}
 
+export async function archiveProfilerLogs(cwd: string, destination: string, before: ReadonlySet<string>): Promise<void> {
+  const source = path.join(cwd, ".pi-observability");
+  const names = await profilerLogFiles(cwd);
   for (const name of names) {
-    if (!name.endsWith(".jsonl")) {
-      continue;
-    }
-    const filePath = path.join(source, name);
-    const info = await stat(filePath);
-    if (info.mtimeMs + 1000 < since) {
-      continue;
-    }
+    if (before.has(name)) continue;
     await mkdir(destination, { recursive: true });
-    await copyFile(filePath, path.join(destination, name));
+    await copyFile(path.join(source, name), path.join(destination, name));
   }
 }
