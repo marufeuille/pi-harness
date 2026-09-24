@@ -5,7 +5,7 @@ import { loadConfig } from "./config.ts";
 import { createDefaultSteps } from "./steps.ts";
 import { runWorkflow } from "./workflow.ts";
 import { loadLinearTicket } from "./ticket.ts";
-import { runLinearLifecycle } from "./linear-lifecycle.ts";
+import { runLinearLifecycle, updateLinearStateResult } from "./linear-lifecycle.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -39,7 +39,7 @@ const input = {
 if (linearId) {
   const outcome = await runLinearLifecycle({
     issueId: linearId,
-    updateLinearIssueState: async () => ({ ok: false as const, reason: "Linear 状態更新 API が利用できません" }),
+    updateLinearIssueState: updateLinearStateResult,
     runWorkflow: () => runWorkflow(input),
   });
   if (!outcome.ok) {
