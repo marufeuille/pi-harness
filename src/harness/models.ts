@@ -24,7 +24,9 @@ export function registerRuntimeModel(model: { provider: string; id: string; reas
     parameters.effort = { values: levels, ...(model.defaultThinkingLevel !== undefined ? { default: model.defaultThinkingLevel } : {}) };
   }
   if (model.maxContextWindow || model.contextWindow) parameters.contextWindow = { range: [1, model.maxContextWindow ?? model.contextWindow!] , default: model.contextWindow };
+  // Cursor publishes fast as supportsFast (and :fast / :slow model ids), not as fastValues.
   if (Array.isArray(model.fastValues)) parameters.fast = { values: model.fastValues, ...(model.defaultFast !== undefined ? { default: model.defaultFast } : {}) };
+  else if (model.supportsFast === true) parameters.fast = { values: [true, false], ...(typeof model.defaultFast === "boolean" ? { default: model.defaultFast } : {}) };
   modelDefinitions[`${model.provider}/${model.id}`] = { provider: model.provider, id: model.id, parameters };
 }
 const effort = (value: string): ParameterRule => ({ values: ["low", "medium", "high", "xhigh"], default: value });

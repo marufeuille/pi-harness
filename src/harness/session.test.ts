@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyStreamOptions, assertWriteAllowed, toolsFor } from "./session.ts";
+import { applyStreamOptions, assertWriteAllowed, cursorPublishesFast, modelForFastParameter, toolsFor } from "./session.ts";
 
 test("fast options reach the SDK runtime streamSimple boundary, including false", () => {
   for (const fast of [true, false]) {
@@ -16,6 +16,20 @@ test("fast options reach the SDK runtime streamSimple boundary, including false"
     runtime.streamSimple(model, { messages: [] }, { temperature: 0.2 });
     assert.deepEqual(received, { temperature: 0.2, fast });
   }
+});
+
+test("cursor fast false selects the slow model id", () => {
+  const models = new Map([
+    ["cursor/grok-4.6", { provider: "cursor", id: "grok-4.6" }],
+    ["cursor/grok-4.6:fast", { provider: "cursor", id: "grok-4.6:fast" }],
+    ["cursor/grok-4.6:slow", { provider: "cursor", id: "grok-4.6:slow" }],
+  ]);
+  const lookup = (provider: string, id: string) => models.get(`${provider}/${id}`);
+  const base = models.get("cursor/grok-4.6")!;
+  assert.equal(cursorPublishesFast(base.id, base.provider, lookup), true);
+  assert.equal(modelForFastParameter(base, false, lookup).id, "grok-4.6:slow");
+  assert.equal(modelForFastParameter(base, true, lookup).id, "grok-4.6:fast");
+  assert.equal(modelForFastParameter({ provider: "xai", id: "grok-4.7" }, false, lookup).id, "grok-4.7");
 });
 
 test("roles never expose unrestricted shell commands", () => {
