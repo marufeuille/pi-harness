@@ -8,6 +8,7 @@ import type { OfflineFixture } from "./session.ts";
 import { runWorkflow } from "./workflow.ts";
 import { loadLinearTicket } from "./ticket.ts";
 import { runLinearLifecycle, updateLinearStateResult } from "./linear-lifecycle.ts";
+import { validateCursorModels } from "./cursor-preflight.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -31,6 +32,14 @@ if (Boolean(ticketPath) === Boolean(linearId)) {
   process.exit(1);
 }
 
+const config = await loadConfig(configPath);
+try {
+  await validateCursorModels(config);
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(1);
+}
+
 let ticket;
 if (linearId) {
   try {
@@ -41,7 +50,6 @@ if (linearId) {
   }
 }
 
-const config = await loadConfig(configPath);
 let fixture: OfflineFixture | undefined;
 if (process.env.HARNESS_E2E_FIXTURE) {
   if (config.phases.pullRequest || config.phases.requireCi || config.phases.merge || config.phases.productionCheck) {
