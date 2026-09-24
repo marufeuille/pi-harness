@@ -24,7 +24,8 @@ import {
 
 export type WorkflowInput = {
   repo: string;
-  ticketPath: string;
+  ticketPath?: string;
+  ticket?: Ticket;
   config: WorkflowConfig;
   steps: Steps;
 };
@@ -55,7 +56,8 @@ type Run = {
 };
 
 export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult> {
-  const ticket = await loadTicket(input.ticketPath);
+  const ticket = input.ticket ?? (input.ticketPath ? await loadTicket(input.ticketPath) : undefined);
+  if (!ticket) throw new Error("チケット入力がありません");
   const run = beginRun(input);
 
   phase("要件を確認する");

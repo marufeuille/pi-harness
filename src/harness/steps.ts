@@ -38,6 +38,8 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
           "または",
           '{"decision":"return","questions":["..."]}',
           "",
+          `タイトル: ${ticket.title}`,
+          "",
           ticket.body,
         ].join("\n"),
       });
@@ -63,6 +65,8 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
           "すでに置いた推測:",
           assumptions.map((item) => `- ${item}`).join("\n") || "(なし)",
           "",
+          `タイトル: ${ticket.title}`,
+          "",
           ticket.body,
         ].join("\n"),
       });
@@ -83,6 +87,8 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
           task.instructions,
           "",
           "チケット:",
+          `タイトル: ${ticket.title}`,
+          "",
           ticket.body,
         ].join("\n"),
       });
@@ -113,6 +119,8 @@ export function createDefaultSteps(config: WorkflowConfig): Steps {
           "",
           "プランの推測:",
           plan.assumptions.map((item) => `- ${item}`).join("\n") || "(なし)",
+          "",
+          `タイトル: ${ticket.title}`,
           "",
           ticket.body,
         ].join("\n"),
