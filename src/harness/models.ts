@@ -13,6 +13,16 @@ export const modelCatalog: Record<string, ModelSpec> = {
 
 export type ParameterRule = { values?: unknown[]; range?: [number, number]; default?: unknown; required?: boolean };
 export type ModelDefinition = { provider: string; id: string; parameters: Record<string, ParameterRule> };
+
+// Runtime catalogs may be supplied by the host/provider integration. Registering
+// catalog metadata is intentionally independent from the selectable aliases.
+export function registerRuntimeModel(model: { provider: string; id: string; reasoning?: boolean; contextWindow?: number; maxContextWindow?: number; thinkingLevelMap?: Record<string, unknown>; [key: string]: any }): void {
+  const levels = model.thinkingLevelMap ? Object.keys(model.thinkingLevelMap) : model.reasoning ? ["minimal", "low", "medium", "high"] : [];
+  const parameters: Record<string, ParameterRule> = {};
+  if (levels.length) parameters.effort = { values: levels, default: levels.includes("medium") ? "medium" : levels[0] };
+  if (model.maxContextWindow || model.contextWindow) parameters.contextWindow = { range: [1, model.maxContextWindow ?? model.contextWindow!] , default: model.contextWindow };
+  modelDefinitions[`${model.provider}/${model.id}`] = { provider: model.provider, id: model.id, parameters };
+}
 const effort = (value: string): ParameterRule => ({ values: ["low", "medium", "high", "xhigh"], default: value });
 const definitions: ModelDefinition[] = [
   { provider: "openai-codex", id: "gpt-6-astra", parameters: { effort: effort("high"), contextWindow: { range: [1, 1000000] } } },
@@ -32,7 +42,9 @@ export function registerModelDefinition(definition: ModelDefinition): void {
 
 export function resolveAndValidateModel(model: ModelSpec, target: string): ModelSpec {
   const definition = modelDefinitions[`${model.provider}/${model.id}`];
-  if (!definition) throw new Error(`${target}: 不明なモデル ${model.provider}/${model.id}`);
+  // Unknown here means the provider/runtime catalog has not been loaded yet;
+  // existence and capabilities are checked against the live model on selection.
+  if (!definition) return model;
   const supplied = model.parameters ?? {};
   for (const key of Object.keys(supplied)) {
     const rule = definition.parameters[key];

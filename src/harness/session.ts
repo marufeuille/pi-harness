@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { ModelSpec } from "./models.ts";
-import { modelCatalog } from "./models.ts";
+import { modelCatalog, registerRuntimeModel } from "./models.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentDir = path.join(harnessRoot, ".pi-clean");
@@ -155,6 +155,7 @@ export async function runRole(options: {
     if (!model) {
       throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
     }
+    registerRuntimeModel(model as any);
     // Parameters belong to the active model invocation, not the initial session
     // configuration; apply them after selecting the model so model changes do not
     // reset the requested thinking level.
@@ -164,7 +165,7 @@ export async function runRole(options: {
     });
     // Reject unsupported levels rather than allowing the session to silently
     // coerce them to a nearby thinking level.
-    const supportedThinkingLevels = model.reasoning ? ["minimal", "low", "medium", "high", "xhigh"] : ["off"];
+    const supportedThinkingLevels = model.thinkingLevelMap ? Object.keys(model.thinkingLevelMap) : (model as any).reasoning ? ["minimal", "low", "medium", "high"] : ["off"];
     if (parameters.effort !== undefined && !supportedThinkingLevels.includes(parameters.effort as string)) {
       throw new Error(`モデルが effort ${String(parameters.effort)} をサポートしていません`);
     }
