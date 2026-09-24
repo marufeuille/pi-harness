@@ -24,6 +24,75 @@ const config: WorkflowConfig = {
   checks: [],
 };
 
+test("既定起点は別ブランチや古い main ではなく取得した origin/main に固定される", async () => {
+  const repo = await initRepo();
+  try {
+    const oldMain = await git(repo, ["rev-parse", "main"]);
+    await addCommit(repo, "remote.txt", "remote\n");
+    await git(repo, ["push", "origin", "main"]);
+    await git(repo, ["checkout", "-b", "other"]);
+    await addCommit(repo, "other.txt", "other\n");
+    const remoteHead = await git(repo, ["rev-parse", "origin/main"]);
+    // Change origin after workflow resolution: the run's selected SHA must stay fixed.
+    let integrationPath = "";
+    const result = await runWorkflow({ repo, ticketPath: await writeTicket(), config, steps: steps({
+      clarify: async () => {
+        await addCommit(repo, "later.txt", "later\n");
+        await git(repo, ["push", "origin", "main"]);
+        return { decision: "proceed", assumptions: [] };
+      },
+      plan: async () => ({ assumptions: [], tasks: [{ id: "feature", title: "x", dependsOn: [], instructions: "x" }] }),
+      implement: async ({ worktree }) => { integrationPath = worktree.path; },
+      review: async () => ({ decision: "pass", concerns: [] }),
+    }) });
+    assert.equal(result.status, "ready");
+    assert.ok(result.integrationPath);
+    assert.equal(await git(result.integrationPath, ["rev-parse", "HEAD"]), remoteHead);
+    assert.notEqual(remoteHead, oldMain);
+  } finally { await rm(repo, { recursive: true, force: true }); }
+});
+
+test("指定 SHA/タグは main の更新に影響されず、PR は指定起点ブランチを使う", async () => {
+  const repo = await initRepo();
+  try {
+    const selected = await git(repo, ["rev-parse", "HEAD"]);
+    await git(repo, ["tag", "chosen"]);
+    await addCommit(repo, "new.txt", "new\n");
+    await git(repo, ["push", "origin", "main"]);
+    let pr: { baseBranch: string; cwd: string } | undefined;
+    const result = await runWorkflow({ repo, ticketPath: await writeTicket(), baseRevision: "chosen",
+      config: { ...config, phases: { ...config.phases, pullRequest: true } }, steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({ assumptions: [], tasks: [{ id: "feature", title: "x", dependsOn: [], instructions: "x" }] }),
+        implement: async () => {}, review: async () => ({ decision: "pass", concerns: [] }),
+        openPullRequest: async (args) => { pr = { baseBranch: args.baseBranch, cwd: args.cwd }; return { url: "https://example.test/pr/1", number: 1 }; },
+      }) });
+    assert.equal(result.status, "ready");
+    assert.ok(result.integrationPath);
+    assert.equal(await git(result.integrationPath, ["rev-parse", "HEAD"]), selected);
+    assert.ok(pr);
+    assert.match(pr.baseBranch, /^harness\//);
+    assert.equal(await git(repo, ["rev-parse", `refs/remotes/origin/${pr.baseBranch}`]), selected);
+  } finally { await rm(repo, { recursive: true, force: true }); }
+});
+
+test("起点の取得・解決に失敗したら処理も worktree 作成も行わない", async () => {
+  for (const failure of ["fetch", "revision"] as const) {
+    const repo = await initRepo();
+    try {
+      if (failure === "fetch") await git(repo, ["remote", "set-url", "origin", path.join(repo, "missing.git")]);
+      let called = false;
+      await assert.rejects(runWorkflow({ repo, ticketPath: await writeTicket(), ...(failure === "revision" ? { baseRevision: "missing-revision" } : {}), config,
+        steps: steps({ clarify: async () => { called = true; return { decision: "proceed", assumptions: [] }; },
+          plan: async () => { called = true; throw new Error("unexpected"); },
+          implement: async () => { called = true; }, openPullRequest: async () => { called = true; throw new Error("unexpected"); } }) }),
+      failure === "fetch" ? /取得に失敗/ : /解決できません/);
+      assert.equal(called, false);
+      assert.deepEqual(await git(repo, ["worktree", "list", "--porcelain"]).then((s) => s.split("\\n").filter((x) => x.startsWith("worktree ")).length), 1);
+    } finally { await rm(repo, { recursive: true, force: true }); }
+  }
+});
+
 test("曖昧ならプランも実装も始めない", async () => {
   const repo = await initRepo();
   try {
@@ -293,6 +362,17 @@ async function initRepo(): Promise<string> {
   await git(["remote", "add", "origin", remote]);
   await git(["push", "-u", "origin", "main"]);
   return repo;
+}
+
+async function git(repo: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd: repo, encoding: "utf8" });
+  return stdout.trim();
+}
+
+async function addCommit(repo: string, file: string, content: string): Promise<void> {
+  await writeFile(path.join(repo, file), content);
+  await git(repo, ["add", file]);
+  await git(repo, ["commit", "-m", file]);
 }
 
 async function writeTicket(): Promise<string> {
