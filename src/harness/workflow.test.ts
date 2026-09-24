@@ -25,7 +25,7 @@ const config: WorkflowConfig = {
 };
 
 test("曖昧ならプランも実装も始めない", async () => {
-  const repo = await mkdtemp(path.join(tmpdir(), "harness-return-"));
+  const repo = await initRepo();
   try {
     const ticketPath = path.join(repo, "ticket.md");
     await writeFile(ticketPath, "# 未定\n\n何かいい感じにして\n");
@@ -288,6 +288,10 @@ async function initRepo(): Promise<string> {
   await writeFile(path.join(repo, "README.md"), "base\n");
   await git(["add", "README.md"]);
   await git(["commit", "-m", "init"]);
+  const remote = path.join(repo, ".git", "origin.git");
+  await execFileAsync("git", ["init", "--bare", remote]);
+  await git(["remote", "add", "origin", remote]);
+  await git(["push", "-u", "origin", "main"]);
   return repo;
 }
 
