@@ -28,6 +28,23 @@ test("agent_end records full last assistant text, not trailing tool result", asy
   }
 });
 
+test("masks credentials from profiler target, error output, and assistant text", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "profiler-test-"));
+  const handlers = new Map<string, (event: any, ctx?: any) => Promise<void>>();
+  const pi = { on: (name: string, handler: (event: any, ctx?: any) => Promise<void>) => handlers.set(name, handler) } as any;
+  const secret = "example-sensitive-aws-secret";
+  try {
+    profiler(pi);
+    await handlers.get("session_start")!({}, { cwd });
+    await handlers.get("tool_call")!({ toolCallId: "1", toolName: "bash", input: { command: `AWS_SECRET_ACCESS_KEY=${secret} aws sts get-caller-identity` } });
+    await handlers.get("tool_result")!({ toolCallId: "1", content: [{ type: "text", text: `failed ${secret}` }], isError: true });
+    await handlers.get("agent_end")!({ messages: [{ role: "assistant", content: secret }] });
+    const log = fs.readdirSync(path.join(cwd, ".pi-observability"))[0];
+    const text = fs.readFileSync(path.join(cwd, ".pi-observability", log), "utf8");
+    assert.ok(!text.includes(secret));
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
+});
+
 test("SDK-shaped tool events record sizes and duplicate counts by input", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "profiler-test-"));
   const handlers = new Map<string, (event: any, ctx?: any) => Promise<void>>();
