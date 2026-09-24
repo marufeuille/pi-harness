@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Ticket } from "./contract.ts";
+import { loadLinearIssue } from "./linear.ts";
 
 export async function loadTicket(ticketPath: string): Promise<Ticket> {
   const body = await readFile(ticketPath, "utf8");
@@ -11,18 +12,18 @@ export async function loadTicket(ticketPath: string): Promise<Ticket> {
 }
 
 export async function loadLinearTicket(identifier: string): Promise<Ticket> {
-  // The Linear adapter owns authentication and retrieval; credentials are never persisted here.
-  const modulePath = "./linear.ts";
-  const adapter = await import(modulePath) as {
-    getIssue?: (id: string) => Promise<{ title: string; body: string }>;
-    fetchIssue?: (id: string) => Promise<{ title: string; body: string }>;
-  };
-  const retrieve = adapter.getIssue ?? adapter.fetchIssue;
-  if (!retrieve) throw new Error("Linear 取得 API が利用できません");
-  const issue = await retrieve(identifier);
-  if (!issue || typeof issue.title !== "string" || typeof issue.body !== "string") {
-    throw new Error("Linear の課題を取得できませんでした");
+  const result = await loadLinearIssue(identifier);
+  if (!result.ok) {
+    const reasons = {
+      authentication: "認証に失敗しました",
+      permission: "課題へのアクセスが許可されていません",
+      communication: "Linear に接続できませんでした",
+      api: "Linear API で取得に失敗しました",
+      not_found: "課題が見つかりません",
+      empty_body: "課題本文が空です",
+      invalid_input: "課題 ID または URL が不正です",
+    };
+    throw new Error(`Linear の課題を取得できませんでした: ${reasons[result.reason]}`);
   }
-  if (!issue.body.trim()) throw new Error("Linear の課題本文が空です");
-  return { path: `linear:${identifier}`, title: issue.title, body: issue.body };
+  return result.ticket;
 }

@@ -46,15 +46,18 @@ test("reports safe failure categories", async () => {
 });
 
 test("Linear ID and URL preserve ticket content and enter the normal clarification sequence", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.LINEAR_API_KEY;
+  process.env.LINEAR_API_KEY = "secret";
+  globalThis.fetch = async () => response(200, issue);
+  try {
   for (const input of ["ABC-1", "https://linear.app/acme/issue/ABC-1/example"]) {
     let calls = 0;
-    const loaded = await loadLinearIssue(input, { apiKey: "secret", fetch: async () => response(200, issue) });
-    assert.equal(loaded.ok, true);
-    if (!loaded.ok) continue;
+    const loaded = await loadLinearTicket(input);
     const repo = await mkdtemp(path.join(tmpdir(), "linear-workflow-"));
     const sequence: string[] = [];
     try {
-      const result = await runWorkflow({ repo, ticket: loaded.ticket, config: minimalConfig(), steps: workflowSteps({
+      const result = await runWorkflow({ repo, ticket: loaded, config: minimalConfig(), steps: workflowSteps({
         clarify: async ({ ticket }) => { calls++; sequence.push("clarify"); assert.equal(ticket.title, "Title"); assert.equal(ticket.body, "  exact body\n"); return { decision: "return", questions: [] }; },
         plan: async () => { sequence.push("plan"); throw Error("unexpected"); },
       }) });
@@ -62,6 +65,29 @@ test("Linear ID and URL preserve ticket content and enter the normal clarificati
       assert.deepEqual(sequence, ["clarify"]);
     } finally { await rm(repo, { recursive: true, force: true }); }
     assert.equal(calls, 1);
+  }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.LINEAR_API_KEY;
+    else process.env.LINEAR_API_KEY = originalKey;
+  }
+});
+
+test("Linear retrieval failure and empty body prevent workflow entry", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.LINEAR_API_KEY;
+  process.env.LINEAR_API_KEY = "secret";
+  let started = false;
+  try {
+    for (const payload of [{ data: { issue: null } }, { data: { issue: { title: "Title", description: "  " } } }]) {
+      globalThis.fetch = async () => response(200, payload);
+      await assert.rejects(loadLinearTicket("ABC-1"));
+      assert.equal(started, false);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.LINEAR_API_KEY;
+    else process.env.LINEAR_API_KEY = originalKey;
   }
 });
 
