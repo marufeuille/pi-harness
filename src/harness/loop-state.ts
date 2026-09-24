@@ -53,6 +53,14 @@ export function readyTasks(tasks: Task[], completedIds: ReadonlySet<string>): Ta
     }));
 }
 
+export function readyFixes(tasks: Task[], completedPlanIds: ReadonlySet<string>): Task[] {
+  const present = new Set(tasks.map((task) => task.id));
+  return tasks.map((task) => ({
+    ...task,
+    dependsOn: task.dependsOn.filter((dependency) => present.has(dependency) || !completedPlanIds.has(dependency)),
+  }));
+}
+
 export function withHint(tasks: Task[], hint: string): Task[] {
   return tasks.map((task) => ({
     ...task,

@@ -10,6 +10,7 @@ import {
   applyHint,
   assertResumeAllowed,
   loadLoopState,
+  readyFixes,
   readyTasks,
   resumeActionFrom,
   saveLoopState,
@@ -91,6 +92,20 @@ test("回答は仮定へ足し、ヒントは残件へ足し、再プラン対�
   assert.deepEqual(
     pending.map((task) => ({ id: task.id, dependsOn: task.dependsOn })),
     [{ id: "next", dependsOn: [] }],
+  );
+  const fixes = readyFixes(
+    [
+      { id: "feature", title: "直す", dependsOn: [], instructions: "直す" },
+      { id: "extra", title: "追加", dependsOn: ["feature"], instructions: "追加" },
+    ],
+    completed,
+  );
+  assert.deepEqual(
+    fixes.map((task) => ({ id: task.id, dependsOn: task.dependsOn })),
+    [
+      { id: "feature", dependsOn: [] },
+      { id: "extra", dependsOn: ["feature"] },
+    ],
   );
 });
 
