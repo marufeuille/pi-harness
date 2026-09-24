@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertWriteAllowed, toolsFor } from "./session.ts";
+import { applyStreamOptions, assertWriteAllowed, toolsFor } from "./session.ts";
+
+test("fast options reach the SDK runtime streamSimple boundary, including false", () => {
+  for (const fast of [true, false]) {
+    let received: Record<string, unknown> | undefined;
+    const model = { provider: "xai", id: "grok-4.7" };
+    const runtime = {
+      streamSimple(_model: unknown, _context: unknown, options: Record<string, unknown> = {}) {
+        received = options;
+      },
+    };
+    assert.equal("stream" in model, false);
+    applyStreamOptions(runtime, { fast });
+    runtime.streamSimple(model, { messages: [] }, { temperature: 0.2 });
+    assert.deepEqual(received, { temperature: 0.2, fast });
+  }
+});
 
 test("roles never expose unrestricted shell commands", () => {
   assert.equal(toolsFor("read").includes("bash"), false);

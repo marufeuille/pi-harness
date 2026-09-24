@@ -1,14 +1,64 @@
-export const modelCatalog = {
-  astra: { provider: "openai-codex", id: "gpt-6-astra", thinking: "high" },
-  luna: { provider: "openai-codex", id: "gpt-6-luna", thinking: "medium" },
-  grok: { provider: "cursor", id: "grok-4.6", thinking: "medium" },
-  fable: { provider: "anthropic", id: "claude-fable-5-1", thinking: "high" },
-} as const;
-
-export type ModelAlias = keyof typeof modelCatalog;
-
 export type ModelSpec = {
   provider: string;
   id: string;
-  thinking: string;
+  parameters?: { effort?: string; fast?: boolean; contextWindow?: number; [parameter: string]: unknown };
 };
+
+export const modelCatalog: Record<string, ModelSpec> = {
+  astra: { provider: "openai-codex", id: "gpt-6-astra", parameters: { effort: "high" } },
+  luna: { provider: "openai-codex", id: "gpt-6-luna", parameters: { effort: "medium" } },
+  grok: { provider: "cursor", id: "grok-4.6", parameters: { effort: "medium" } },
+  fable: { provider: "anthropic", id: "claude-fable-5-1", parameters: { effort: "high" } },
+};
+
+export type ParameterRule = { values?: unknown[]; range?: [number, number]; default?: unknown; required?: boolean };
+export type ModelDefinition = { provider: string; id: string; parameters: Record<string, ParameterRule> };
+
+// Runtime catalogs may be supplied by the host/provider integration. Registering
+// catalog metadata is intentionally independent from the selectable aliases.
+export function registerRuntimeModel(model: { provider: string; id: string; reasoning?: boolean; contextWindow?: number; maxContextWindow?: number; thinkingLevelMap?: Record<string, unknown>; [key: string]: any }): void {
+  const parameters: Record<string, ParameterRule> = {};
+  // Only capabilities explicitly published by the provider catalog are authoritative.
+  if (model.thinkingLevelMap) {
+    const levels = Object.keys(model.thinkingLevelMap);
+    parameters.effort = { values: levels, ...(model.defaultThinkingLevel !== undefined ? { default: model.defaultThinkingLevel } : {}) };
+  }
+  if (model.maxContextWindow || model.contextWindow) parameters.contextWindow = { range: [1, model.maxContextWindow ?? model.contextWindow!] , default: model.contextWindow };
+  if (Array.isArray(model.fastValues)) parameters.fast = { values: model.fastValues, ...(model.defaultFast !== undefined ? { default: model.defaultFast } : {}) };
+  modelDefinitions[`${model.provider}/${model.id}`] = { provider: model.provider, id: model.id, parameters };
+}
+const effort = (value: string): ParameterRule => ({ values: ["low", "medium", "high", "xhigh"], default: value });
+const definitions: ModelDefinition[] = [
+  { provider: "openai-codex", id: "gpt-6-astra", parameters: { effort: effort("high"), contextWindow: { range: [1, 1000000] } } },
+  { provider: "openai-codex", id: "gpt-6-luna", parameters: { effort: effort("medium"), contextWindow: { range: [1, 1000000] } } },
+  { provider: "cursor", id: "grok-4.6", parameters: { effort: effort("medium"), fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
+  { provider: "cursor", id: "grok-4.7", parameters: { effort: effort("medium"), fast: { values: [true, false], default: true }, contextWindow: { range: [1, 200000] } } },
+  { provider: "xai", id: "grok-4.7", parameters: { effort: { values: ["low", "medium", "high", "xhigh"], default: "medium" }, fast: { values: [true, false], default: true }, contextWindow: { range: [1, 500000] } } },
+  { provider: "anthropic", id: "claude-fable-5-1", parameters: { effort: effort("high"), contextWindow: { range: [1, 200000] } } },
+];
+// Model capability metadata is the provider/runtime catalog snapshot used for offline preflight.
+// Keep this catalog extensible: adding a catalog entry makes that model selectable by ID.
+export const modelDefinitions: Record<string, ModelDefinition> = Object.fromEntries(definitions.map((d) => [`${d.provider}/${d.id}`, d]));
+
+export function registerModelDefinition(definition: ModelDefinition): void {
+  modelDefinitions[`${definition.provider}/${definition.id}`] = definition;
+}
+
+export function resolveAndValidateModel(model: ModelSpec, target: string): ModelSpec {
+  const definition = modelDefinitions[`${model.provider}/${model.id}`];
+  if (!definition) throw new Error(`${target}: カタログにモデルがありません (${model.provider}/${model.id})`);
+  const supplied = model.parameters ?? {};
+  for (const key of Object.keys(supplied)) {
+    const rule = definition.parameters[key];
+    if (!rule) throw new Error(`${target}: 非対応パラメータ ${key}`);
+    const value = supplied[key];
+    if (rule.values && !rule.values.includes(value)) throw new Error(`${target}: 非対応 ${key} ${String(value)}`);
+    if (rule.range && (typeof value !== "number" || value < rule.range[0] || value > rule.range[1])) throw new Error(`${target}: ${key} が範囲外`);
+  }
+  const parameters: Record<string, unknown> = {};
+  for (const [key, rule] of Object.entries(definition.parameters)) {
+    if (rule.required && supplied[key] === undefined) throw new Error(`${target}: 必須パラメータ ${key} がありません`);
+    if (rule.default !== undefined || supplied[key] !== undefined) parameters[key] = supplied[key] ?? rule.default;
+  }
+  return { ...model, parameters };
+}

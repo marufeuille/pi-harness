@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WorkflowConfig } from "./config.ts";
-import { modelCatalog } from "./models.ts";
+import { resolveAndValidateModel } from "./models.ts";
 
 const agentDir = path.join(fileURLToPath(new URL("../..", import.meta.url)), ".pi-clean");
 
@@ -15,8 +15,11 @@ async function sdkModels(apiKey: string): Promise<unknown> {
 }
 
 export async function validateCursorModels(config: WorkflowConfig, options: Options = {}): Promise<void> {
-  const aliases = [config.models.smart, config.models.cheap].filter((alias) => alias === "grok");
-  if (!aliases.length) return;
+  const selectedModels = [
+    resolveAndValidateModel(config.models.smart, "models.smart"),
+    resolveAndValidateModel(config.models.cheap, "models.cheap"),
+  ].filter((model) => model.provider === "cursor");
+  if (!selectedModels.length) return;
   let storedKey: string | undefined;
   try {
     const auth = JSON.parse(await fs.readFile(options.authPath ?? path.join(agentDir, "auth.json"), "utf8")) as Record<string, any>;
@@ -32,6 +35,6 @@ export async function validateCursorModels(config: WorkflowConfig, options: Opti
   const models = Array.isArray(payload) ? payload : payload && typeof payload === "object" && "models" in payload ? (payload as any).models : undefined;
   if (!Array.isArray(models)) throw new Error("Cursor のモデル一覧の形式が不正です");
   const ids = models.map((item) => typeof item === "string" ? item : item && typeof item === "object" && typeof item.id === "string" ? item.id : undefined).filter((id): id is string => Boolean(id));
-  const selected = new Set(aliases.map((alias) => config.models.cursorGrokId ?? modelCatalog[alias].id));
+  const selected = new Set(selectedModels.map((model) => model.id));
   for (const id of selected) if (!ids.includes(id)) throw new Error(`Cursor のモデル一覧に選択 ID がありません: ${id}`);
 }

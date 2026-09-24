@@ -6,7 +6,7 @@ import path from "node:path";
 import { validateCursorModels } from "./cursor-preflight.ts";
 import type { WorkflowConfig } from "./config.ts";
 
-const config = (smart: "grok" | "astra" = "grok"): WorkflowConfig => ({ models: { smart, cheap: "astra", cursorGrokId: "grok-4.6" }, phases: { pullRequest: false, requireCi: false, merge: false, productionCheck: false }, review: { maxLoops: 1 }, checks: [] });
+const config = (): WorkflowConfig => ({ models: { smart: { provider: "cursor", id: "grok-4.6", parameters: { effort: "medium" } }, cheap: { provider: "openai-codex", id: "gpt-6-astra", parameters: { effort: "high" } }, cursorGrokId: "grok-4.6" }, phases: { pullRequest: false, requireCi: false, merge: false, productionCheck: false }, review: { maxLoops: 1 }, checks: [] });
 const ok = async (key: string) => { assert.equal(key, "saved"); return [{ id: "grok-4.6" }]; };
 
 test("validates selected model using saved credentials without environment key", async () => {

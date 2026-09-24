@@ -11,8 +11,8 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-import type { ModelAlias, ModelSpec } from "./models.ts";
-import { modelCatalog } from "./models.ts";
+import type { ModelSpec } from "./models.ts";
+import { modelCatalog, registerRuntimeModel, resolveAndValidateModel } from "./models.ts";
 
 const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 const agentDir = path.join(harnessRoot, ".pi-clean");
@@ -55,13 +55,25 @@ export function toolsFor(role: "read" | "edit"): string[] {
   return role === "edit" ? editTools : readOnlyTools;
 }
 
+type StreamRuntime = {
+  streamSimple: (model: unknown, context: unknown, options?: Record<string, unknown>) => unknown;
+};
+
+/** Intercept the SDK's stream invocation boundary; runtime models themselves do not expose stream(). */
+export function applyStreamOptions<T extends StreamRuntime>(runtime: T, options: Record<string, unknown>): T {
+  const streamSimple = runtime.streamSimple.bind(runtime);
+  runtime.streamSimple = ((model: unknown, context: unknown, streamOptions: Record<string, unknown> = {}) =>
+    streamSimple(model, context, { ...streamOptions, ...options })) as T["streamSimple"];
+  return runtime;
+}
+
 export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }> }> ; index: number };
 
 export async function runRole(options: {
   role: "smart" | "cheap";
   fixture?: OfflineFixture;
   stage?: string;
-  model: ModelAlias | ModelSpec;
+  model: ModelSpec;
   cwd: string;
   prompt: string;
   tools: string[];
@@ -79,7 +91,8 @@ export async function runRole(options: {
     }
     return call.text;
   }
-  const spec = typeof options.model === "string" ? modelCatalog[options.model] : options.model;
+  const spec = options.model;
+  const parameters = spec.parameters ?? {};
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsStorePath: path.join(agentDir, "models-store.json"),
@@ -118,7 +131,7 @@ export async function runRole(options: {
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
     agentDir,
-    thinkingLevel: spec.thinking,
+    thinkingLevel: parameters.effort as any,
     modelRuntime,
     resourceLoader,
     tools: options.tools,
@@ -147,13 +160,33 @@ export async function runRole(options: {
     if (!model) {
       throw new Error(`モデルが見つかりません: ${options.model} (${spec.provider}/${spec.id})`);
     }
-    await session.setModel(model);
+    registerRuntimeModel(model as any);
+    const validated = resolveAndValidateModel(spec, `models.${options.role}`);
+    const activeParameters = validated.parameters ?? {};
+    // Parameters belong to the active model invocation, not the initial session
+    // configuration; apply them after selecting the model so model changes do not
+    // reset the requested thinking level.
+    await session.setModel({
+      ...model,
+      ...(typeof activeParameters.contextWindow === "number" ? { contextWindow: activeParameters.contextWindow } : {}),
+    });
+    // Reject unsupported levels rather than allowing the session to silently
+    // coerce them to a nearby thinking level.
+    const supportedThinkingLevels = model.thinkingLevelMap ? Object.keys(model.thinkingLevelMap) : (model as any).reasoning ? ["minimal", "low", "medium", "high"] : ["off"];
+    if (activeParameters.effort !== undefined && !supportedThinkingLevels.includes(activeParameters.effort as string)) {
+      throw new Error(`モデルが effort ${String(activeParameters.effort)} をサポートしていません`);
+    }
+    if (activeParameters.effort !== undefined) await session.setThinkingLevel(activeParameters.effort as any);
     const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
     const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
     if (!logCreated) {
       throw new Error("profiler のログファイルを作成できませんでした");
     }
 
+    // PromptOptions in SDK 0.87.1 does not forward provider stream options.
+    // Apply validated parameters at the ModelRuntime boundary used by the SDK (models have no stream()).
+    const { effort: _effort, contextWindow: _contextWindow, ...streamOptions } = activeParameters;
+    if (Object.keys(streamOptions).length > 0) applyStreamOptions(modelRuntime as any, streamOptions);
     await session.prompt(options.prompt);
     const text = session.getLastAssistantText();
     if (!text) {
