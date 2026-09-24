@@ -24,13 +24,33 @@ export function toolsFor(role: "read" | "edit"): string[] {
   return role === "edit" ? editTools : readOnlyTools;
 }
 
+export type OfflineFixture = { calls: Array<{ stage: string; response: string; writes?: Record<string, string> }> ; index: number };
+
 export async function runRole(options: {
   role: "smart" | "cheap";
+  fixture?: OfflineFixture;
+  stage?: string;
   model: ModelAlias;
   cwd: string;
   prompt: string;
   tools: string[];
 }): Promise<string> {
+  if (options.fixture) {
+    const call = options.fixture.calls[options.fixture.index++];
+    if (!call || call.stage !== options.stage) throw new Error(`固定応答の呼び出し段階が一致しません: ${options.stage}`);
+    if (call.writes) {
+      if (options.stage !== "implement") throw new Error("実装以外の段階では writes を指定できません");
+      for (const [relative, content] of Object.entries(call.writes)) {
+        if (path.isAbsolute(relative)) throw new Error("絶対パスへの書き込みは禁止されています");
+        const target = path.resolve(options.cwd, relative);
+        const rel = path.relative(options.cwd, target);
+        if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error("作業ツリー外への書き込みは禁止されています");
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, content, "utf8");
+      }
+    }
+    return call.response;
+  }
   const spec = modelCatalog[options.model];
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
