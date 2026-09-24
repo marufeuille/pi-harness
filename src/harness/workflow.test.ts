@@ -462,6 +462,44 @@ test("減っている致命的な残件は上限で止まり、追加回数で�
   }
 });
 
+test("Linear 識別情報は停止状態に残り再開後も保持される", async () => {
+  const repo = await initRepo();
+  try {
+    const first = await runWorkflow({
+      repo,
+      ticket: { path: "linear:ABC-1", title: "挨拶", body: "Hello, name を返す" },
+      linearIssueId: "ABC-1",
+      config: { ...config, review: { maxLoops: 1 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({ assumptions: [], tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }] }),
+        implement: async () => {},
+        review: async () => ({ decision: "fix", issues: [{ id: "fix-a", title: "境界", dependsOn: [], instructions: "直す" }] }),
+      }),
+    });
+    assert.equal(first.status, "escalated");
+    if (first.status !== "escalated") throw new Error("expected stop");
+    assert.equal(first.resumeState.linearIssueId, "ABC-1");
+    const stored = await loadLoopState(first.runDir);
+    assert.equal(stored.linearIssueId, "ABC-1");
+    const second = await runWorkflow({
+      repo,
+      config: { ...config, review: { maxLoops: 1 } },
+      steps: steps({
+        implement: async () => {},
+        review: async () => ({ decision: "fix", issues: [{ id: "fix-a", title: "境界", dependsOn: [], instructions: "直す" }] }),
+      }),
+      resume: { state: stored, extraRounds: 1 },
+    });
+    assert.equal(second.status, "escalated");
+    if (second.status !== "escalated") throw new Error("expected stop");
+    assert.equal(second.resumeState.linearIssueId, "ABC-1");
+    assert.equal((await loadLoopState(first.runDir)).linearIssueId, "ABC-1");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
 test("同じ指摘が続くと残り周を使わず止まり、回数追加の再開はできない", async () => {
   const repo = await initRepo();
   const issue = { id: "fix-a", title: "境界", dependsOn: [] as string[], instructions: "空白を拒否する" };

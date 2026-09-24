@@ -90,6 +90,27 @@ test("resume CLI rejects contradictory or disallowed input before work starts", 
       { args: ["--resume", stateFile, "--extra-rounds", "2"], pattern: /追加回数/ },
       { args: ["--resume", stateFile, "--answer", "400"], pattern: /回答/ },
     ];
+    const linearState = path.join(temp, "linear-loop-state.json");
+    await writeFile(linearState, JSON.stringify({
+      ticket: { path: "linear:ABC-1", title: "t", body: "b" },
+      assumptions: [],
+      remaining: [],
+      history: [],
+      remainingTasks: [],
+      ingestPosition: 0,
+      completedTaskIds: [],
+      integrationBranch: "harness/run/integration",
+      integrationPath: path.join(temp, "missing-integration"),
+      runId: "run",
+      runDir: temp,
+      baseSha: "abc",
+      baseBranch: "main",
+      plan: { assumptions: [], tasks: [{ id: "T1", title: "t", dependsOn: [], instructions: "t" }] },
+      originalMaxLoops: 3,
+      stopKind: "decreasing-fatal",
+      linearIssueId: "ABC-1",
+    }));
+    cases.push({ args: ["--resume", linearState, "--linear", "XYZ-9", "--extra-rounds", "1"], pattern: /異なる/ });
     for (const item of cases) {
       const result = await spawnHarness(repo, fixture, item.args, { config: e2eConfig() });
       assert.notEqual(result.code, 0, item.args.join(" "));

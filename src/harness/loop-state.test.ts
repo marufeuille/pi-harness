@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -105,4 +105,14 @@ test("再開状態を runDir に保存する", async () => {
   const loaded = await loadLoopState(dir);
   assert.equal(loaded.runId, "run");
   assert.equal((await loadLoopState(path.join(dir, "loop-state.json"))).stopKind, "decreasing-fatal");
+});
+
+test("Linear 識別情報を保存して読み戻す", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "loop-state-linear-"));
+  const value = state("decreasing-fatal", { runDir: dir, linearIssueId: "ABC-1", ticket: { path: "linear:ABC-1", title: "挨拶", body: "Hello, name を返す" } });
+  await saveLoopState(dir, value);
+  const loaded = await loadLoopState(dir);
+  assert.equal(loaded.linearIssueId, "ABC-1");
+  await writeFile(path.join(dir, "loop-state.json"), JSON.stringify({ ...value, linearIssueId: "" }));
+  await assert.rejects(loadLoopState(dir), /形式が不正/);
 });
