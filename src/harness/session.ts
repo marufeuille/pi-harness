@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,6 +78,17 @@ export async function runRole(options: {
   }
 
   try {
+    // Binding extensions dispatches session_start. Do not prompt until the
+    // profiler's synchronous session_start handler has created its log.
+    const observabilityDir = path.join(options.cwd, ".pi-observability");
+    const before = new Set(await fs.readdir(observabilityDir).catch(() => [] as string[]));
+    await session.bindExtensions();
+    const entries = await fs.readdir(observabilityDir).catch(() => [] as string[]);
+    const logCreated = entries.some((entry) => entry.endsWith(".jsonl") && !before.has(entry));
+    if (!logCreated) {
+      throw new Error("profiler のログファイルを作成できませんでした");
+    }
+
     await session.prompt(options.prompt);
     const text = session.getLastAssistantText();
     if (!text) {
