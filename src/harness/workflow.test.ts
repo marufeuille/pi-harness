@@ -996,6 +996,176 @@ test("衝突の再開は未解消なら再停止し、解消済みなら取り�
   }
 });
 
+test("統合作業ツリーの逸脱は再開時に変更せず止まり、元ブランチへ戻したあとだけ続く", async () => {
+  const repo = await initRepo();
+  const issue = (id: string) => ({ id, title: id, dependsOn: [] as string[], instructions: id });
+  try {
+    let reviews = 0;
+    const implemented: string[] = [];
+    const first = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 2 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => {
+          reviews += 1;
+          if (reviews === 1) {
+            return { decision: "fix", issues: [issue("fix-a"), issue("fix-b")] };
+          }
+          return { decision: "fix", issues: [issue("fix-a")] };
+        },
+      }),
+    });
+    assert.equal(first.status, "escalated");
+    if (first.status !== "escalated") throw new Error("expected stop");
+    assert.equal(first.stop.kind, "decreasing-fatal");
+    const integrationPath = first.integrationPath!;
+    const expectedBranch = first.stop.branch;
+    const beforeHead = await git(integrationPath, ["rev-parse", "HEAD"]);
+    await git(integrationPath, ["checkout", "-B", "stray"]);
+    const implementedBefore = [...implemented];
+
+    const stillDrifted = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 2 } },
+      steps: steps({
+        clarify: async () => {
+          throw new Error("逸脱中は要件確認しない");
+        },
+        plan: async () => {
+          throw new Error("逸脱中は再プランしない");
+        },
+        implement: async () => {
+          throw new Error("逸脱中は実装しない");
+        },
+        review: async () => {
+          throw new Error("逸脱中は検品しない");
+        },
+      }),
+      resume: { state: first.resumeState, extraRounds: 1 },
+    });
+    assert.equal(stillDrifted.status, "escalated");
+    if (stillDrifted.status === "escalated") {
+      assert.equal(stillDrifted.stop.kind, "branch-deviation");
+      assert.match(stillDrifted.stop.lastOutput, /外れました/);
+      assert.equal(stillDrifted.integrationPath, first.integrationPath);
+      assert.equal(stillDrifted.stop.branch, expectedBranch);
+    }
+    assert.equal(await git(integrationPath, ["rev-parse", "--abbrev-ref", "HEAD"]), "stray");
+    assert.equal(await git(integrationPath, ["rev-parse", "HEAD"]), beforeHead);
+    assert.deepEqual(implemented, implementedBefore);
+
+    await git(integrationPath, ["checkout", expectedBranch]);
+    const restored = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 2 } },
+      steps: steps({
+        clarify: async () => {
+          throw new Error("再開で要件確認しない");
+        },
+        plan: async () => {
+          throw new Error("再開で最初からプランしない");
+        },
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+      resume: { state: first.resumeState, extraRounds: 1 },
+    });
+    assert.equal(restored.status, "ready");
+    assert.equal(restored.integrationPath, first.integrationPath);
+    assert.equal(await git(integrationPath, ["rev-parse", "--abbrev-ref", "HEAD"]), expectedBranch);
+    assert.deepEqual(implemented, [...implementedBefore, "fix-a"]);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("取り込み前に統合作業ツリーが逸脱しているとマージせず止まり、元ブランチへ戻したあとだけ続く", async () => {
+  const repo = await initRepo();
+  try {
+    const first = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ worktree }) => {
+          await writeFile(path.join(worktree.path, "feature.txt"), "ok\n");
+          await git(path.resolve(worktree.path, "..", "..", "integration"), ["checkout", "-B", "stray"]);
+        },
+        review: async () => {
+          throw new Error("逸脱したら検品まで進まない");
+        },
+      }),
+    });
+    assert.equal(first.status, "escalated");
+    if (first.status !== "escalated") throw new Error("expected stop");
+    assert.equal(first.stop.kind, "branch-deviation");
+    assert.match(first.stop.lastOutput, /外れました/);
+    const integrationPath = first.integrationPath!;
+    const expectedBranch = first.stop.branch;
+    assert.equal(await git(integrationPath, ["rev-parse", "--abbrev-ref", "HEAD"]), "stray");
+    await assert.rejects(readFile(path.join(integrationPath, "feature.txt"), "utf8"));
+
+    const stillDrifted = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        implement: async () => {
+          throw new Error("逸脱の再開で実装し直さない");
+        },
+        review: async () => {
+          throw new Error("未解消なら検品しない");
+        },
+      }),
+      resume: { state: first.resumeState, continueFromIngest: true },
+    });
+    assert.equal(stillDrifted.status, "escalated");
+    if (stillDrifted.status === "escalated") {
+      assert.equal(stillDrifted.stop.kind, "branch-deviation");
+    }
+    assert.equal(await git(integrationPath, ["rev-parse", "--abbrev-ref", "HEAD"]), "stray");
+    await assert.rejects(readFile(path.join(integrationPath, "feature.txt"), "utf8"));
+
+    await git(integrationPath, ["checkout", expectedBranch]);
+    const restored = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        implement: async () => {
+          throw new Error("戻したあとも実装し直さない");
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+      resume: { state: await loadLoopState(first.runDir), continueFromIngest: true },
+    });
+    assert.equal(restored.status, "ready");
+    assert.equal(restored.integrationPath, first.integrationPath);
+    assert.equal(await git(integrationPath, ["rev-parse", "--abbrev-ref", "HEAD"]), expectedBranch);
+    assert.equal(await readFile(path.join(integrationPath, "feature.txt"), "utf8"), "ok\n");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
 test("ブランチ逸脱の再開は戻してから取り込み、環境失敗はチェック種別を優先する", async () => {
   const repo = await initRepo();
   try {

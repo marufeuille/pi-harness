@@ -26,6 +26,8 @@ test("既存作業ツリーが期待ブランチにいるかを検証し、外�
     const task = await openTaskWorktree(repo, "run-branch", "feature", integration.branch);
     const ok = await verifyWorktreeBranch(task);
     assert.deepEqual(ok, { ok: true, path: task.path, branch: task.branch });
+    const integrationOk = await verifyWorktreeBranch(integration);
+    assert.deepEqual(integrationOk, { ok: true, path: integration.path, branch: integration.branch });
 
     await runGit(task.path, ["checkout", "-B", "other"]);
     const drifted = await verifyWorktreeBranch(task);
@@ -38,6 +40,17 @@ test("既存作業ツリーが期待ブランチにいるかを検証し、外�
     assert.equal(await currentBranch(task.path), "other");
     await access(task.path);
     assert.match(await runGit(repo, ["branch", "--list", task.branch]), new RegExp(task.branch));
+
+    await runGit(integration.path, ["checkout", "-B", "other-int"]);
+    const driftedIntegration = await verifyWorktreeBranch(integration);
+    assert.equal(driftedIntegration.ok, false);
+    if (driftedIntegration.ok) return;
+    assert.equal(driftedIntegration.path, integration.path);
+    assert.equal(driftedIntegration.expected, integration.branch);
+    assert.equal(driftedIntegration.actual, "other-int");
+    assert.equal(await currentBranch(integration.path), "other-int");
+    await access(integration.path);
+    assert.match(await runGit(repo, ["branch", "--list", integration.branch]), new RegExp(integration.branch));
   } finally {
     await rm(repo, { recursive: true, force: true });
   }

@@ -176,6 +176,10 @@ async function continueFromState(input: WorkflowInput, ticket: Ticket): Promise<
   const run = resumeRun(input, resume.state, action);
   run.ticket = ticket;
   await access(resume.state.integrationPath);
+  const drifted = await stopIfIntegrationBranchDeviated(run);
+  if (drifted) {
+    return finish(run, stoppedOutcome(run, drifted.kind, drifted.lastOutput, "same"));
+  }
 
   let state = resume.state;
   if ("hint" in action) {
@@ -307,6 +311,10 @@ type ImplementStop = {
 };
 
 async function resumeFromIngest(run: Run, ticket: Ticket): Promise<{ status: "implemented" } | ImplementStop> {
+  const drifted = await stopIfIntegrationBranchDeviated(run);
+  if (drifted) {
+    return drifted;
+  }
   const pending = await inspectPendingMerge(integration(run));
   if (pending.pending) {
     const continued = await continueMerge(integration(run));
@@ -382,6 +390,12 @@ async function implementTasks(
         run.remainingTasks = leftover();
         run.remaining = leftover();
         return { status: "stopped", kind: "branch-deviation", lastOutput: outcome.reason };
+      }
+      const drifted = await stopIfIntegrationBranchDeviated(run);
+      if (drifted) {
+        run.remainingTasks = leftover();
+        run.remaining = leftover();
+        return drifted;
       }
       const ahead = await commitsAhead(outcome.worktree.path, integration(run).branch, outcome.worktree.branch);
       if (ahead === 0) {
@@ -627,6 +641,14 @@ function integration(run: Run): Worktree {
     throw new Error("統合用の worktree がまだありません");
   }
   return run.integration;
+}
+
+async function stopIfIntegrationBranchDeviated(run: Run): Promise<ImplementStop | undefined> {
+  const verified = await verifyWorktreeBranch(integration(run));
+  if (verified.ok) {
+    return undefined;
+  }
+  return { status: "stopped", kind: "branch-deviation", lastOutput: verified.reason };
 }
 
 async function keepLogs(run: Run, label: string, cwd: string, before: ReadonlySet<string>): Promise<void> {
