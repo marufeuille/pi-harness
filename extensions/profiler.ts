@@ -100,6 +100,19 @@ export default function profiler(pi: ExtensionAPI) {
   const seenInputs = new Map<string, number>();
 
   let logFile: string | undefined;
+  const sessionSecrets = new Set<string>();
+
+  function redact(value: unknown, limit = MAX_CHARS): string {
+    let raw: string;
+    try { raw = typeof value === "string" ? value : JSON.stringify(value) ?? String(value); }
+    catch { raw = String(value); }
+    for (const match of raw.matchAll(/(?:AWS_SECRET_ACCESS_KEY|[A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|SECRET_KEY|TOKEN|PASSWORD))\s*[:=]\s*["']?([^\s"',;]+)/gi)) {
+      if (match[1] && match[1].length >= 3) sessionSecrets.add(match[1]);
+    }
+    let text = maskSecrets(raw);
+    for (const secret of sessionSecrets) text = text.split(secret).join("[REDACTED]");
+    return text.slice(0, limit);
+  }
 
   function write(record: unknown) {
     if (!logFile) {
@@ -164,6 +177,8 @@ export default function profiler(pi: ExtensionAPI) {
       duplicateInputCount,
     );
 
+    redact(event.input);
+
     active.set(
       event.toolCallId,
       {
@@ -171,7 +186,7 @@ export default function profiler(pi: ExtensionAPI) {
         startedAt: performance.now(),
         inputChars,
         inputHash,
-        target: targetOf(event.toolName, event.input),
+        target: redact(targetOf(event.toolName, event.input)),
       },
     );
   });
@@ -215,7 +230,7 @@ export default function profiler(pi: ExtensionAPI) {
 
       isError: event.isError ?? false,
       target: current.target,
-      ...(event.isError ? { errorOutput: safeText((event as any).content?.map?.((item: any) => item.text ?? "").join("\\n") ?? event.content) } : {}),
+      ...(event.isError ? { errorOutput: redact((event as any).content?.map?.((item: any) => item.text ?? "").join("\n") ?? event.content) } : {}),
     };
 
     write(record);
@@ -232,12 +247,12 @@ export default function profiler(pi: ExtensionAPI) {
       ? [...messages].reverse().find((message: any) => message?.role === "assistant")
       : undefined;
     const text = typeof last?.content === "string" ? last.content : Array.isArray(last?.content)
-      ? last.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\\n")
+      ? last.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n")
       : "";
     write({
       timestamp: new Date().toISOString(),
       type: "agent_end",
-      assistantText: safeText(text, Number.POSITIVE_INFINITY),
+      assistantText: redact(text, Number.POSITIVE_INFINITY),
     });
   });
 
