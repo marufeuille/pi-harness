@@ -103,6 +103,13 @@ test("updates only state resolved from the issue's own team", async () => {
     } });
     const stateQuery = requests[0] as { query: string; variables: Record<string, string> };
     assert.match(stateQuery.query, /team\s*\{\s*id\s+states\s*\{\s*nodes\s*\{\s*id\s+name\s*\}\s*\}\s*\}/);
+    let braceBalance = 0;
+    for (const character of stateQuery.query) {
+      if (character === "{") braceBalance++;
+      if (character === "}") braceBalance--;
+      assert.ok(braceBalance >= 0, "query closes a brace before opening it");
+    }
+    assert.equal(braceBalance, 0, "entire GraphQL query must have balanced braces");
     assert.doesNotMatch(stateQuery.query, /workflowStates/);
     assert.deepEqual(stateQuery.variables, { id: "ABC-1" });
     const mutation = requests[1] as { query: string; variables: Record<string, string> };
