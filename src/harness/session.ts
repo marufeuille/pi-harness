@@ -85,6 +85,18 @@ export async function runRole(options: {
     modelsStorePath: path.join(agentDir, "models-store.json"),
     refreshOnCreate: false,
   });
+  const priorCursorApiKey = process.env.CURSOR_API_KEY;
+  // pi-cursor-sdk's initial model discovery reads the default stored credential,
+  // independently of ModelRuntime's authPath. Bridge the harness credential
+  // through the SDK's supported environment key while loading extensions.
+  if (!process.env.CURSOR_API_KEY) {
+    try {
+      const auth = JSON.parse(await fs.readFile(path.join(agentDir, "auth.json"), "utf8")) as Record<string, any>;
+      if (auth.cursor?.type === "api_key" && typeof auth.cursor.key === "string") {
+        process.env.CURSOR_API_KEY = auth.cursor.key;
+      }
+    } catch { /* no saved cursor credential */ }
+  }
   const resourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir,
@@ -97,7 +109,11 @@ export async function runRole(options: {
       "あなたはハーネスから呼ばれた作業者です。渡された作業だけを行い、スキルの探索や関係ないツール追加はしないでください。",
     settingsManager: SettingsManager.inMemory(),
   });
-  await resourceLoader.reload();
+  try {
+    await resourceLoader.reload();
+  } finally {
+    if (priorCursorApiKey === undefined) delete process.env.CURSOR_API_KEY; else process.env.CURSOR_API_KEY = priorCursorApiKey;
+  }
 
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
