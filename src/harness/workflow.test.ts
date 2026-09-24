@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import type { WorkflowConfig } from "./config.ts";
 import type { Steps } from "./contract.ts";
 import { loadLoopState } from "./loop-state.ts";
+import { allowedResumeActions, mentionedResumeActions } from "./loop-stop.ts";
 import { runWorkflow } from "./workflow.ts";
 
 const execFileAsync = promisify(execFile);
@@ -493,7 +494,9 @@ test("同じ指摘が続くと残り周を使わず止まり、回数追加の�
     if (result.status !== "escalated") throw new Error("expected stop");
     assert.equal(result.stop.kind, "stalled");
     assert.equal(result.stop.trend, "same");
-    assert.match(result.stop.recommendation, /ヒント|プラン/);
+    const stalledMentioned = mentionedResumeActions(result.stop.recommendation);
+    assert.equal(stalledMentioned.length, 1);
+    assert.ok(allowedResumeActions("stalled").includes(stalledMentioned[0]!));
     assert.equal(result.stop.recommendation.includes("追加回数"), false);
     await assert.rejects(
       runWorkflow({
@@ -783,14 +786,9 @@ test("同じチェック失敗は早期停止し、中身が変わるチェッ�
     if (changing.status === "escalated") {
       assert.equal(changing.stop.kind, "changing");
       assert.equal(changing.stop.trend, "shifted");
-      assert.match(changing.stop.recommendation, /追加回数/);
-      assert.match(changing.stop.recommendation, /ヒント/);
-      assert.match(changing.stop.recommendation, /再プラン/);
-      assert.doesNotThrow(() =>
-        assert.ok(["extraRounds", "hint", "replanRemaining"].every((name) =>
-          changing.stop.recommendation.includes(name === "extraRounds" ? "追加回数" : name === "hint" ? "ヒント" : "再プラン"),
-        )),
-      );
+      const changingMentioned = mentionedResumeActions(changing.stop.recommendation);
+      assert.equal(changingMentioned.length, 1);
+      assert.ok(allowedResumeActions("changing").includes(changingMentioned[0]!));
     }
   } finally {
     await rm(repo, { recursive: true, force: true });

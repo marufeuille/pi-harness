@@ -11,7 +11,10 @@ import {
   isEnvironmentCheckFailure,
   kindForIssueLimit,
   makeStopSnapshot,
+  mentionedResumeActions,
   recommendationFor,
+  recommendedResumeAction,
+  type StopKind,
 } from "./loop-stop.ts";
 
 const issue = (id: string, text = id): Task => ({ id, title: id, dependsOn: [], instructions: text });
@@ -55,16 +58,29 @@ test("作業ツリーでは直せないチェック失敗を検出する", () =>
 });
 
 test("停止種類ごとの推奨と再開手段が仕様どおり", () => {
-  assert.match(recommendationFor("decreasing-fatal"), /追加回数/);
+  const kinds: StopKind[] = [
+    "decreasing-fatal",
+    "stalled",
+    "changing",
+    "insufficient-requirements",
+    "conflict",
+    "branch-deviation",
+    "environment-check",
+  ];
+  for (const kind of kinds) {
+    const recommendation = recommendationFor(kind);
+    const mentioned = mentionedResumeActions(recommendation);
+    assert.equal(mentioned.length, 1);
+    assert.equal(mentioned[0], recommendedResumeAction(kind));
+    assert.ok(allowedResumeActions(kind).includes(mentioned[0]!));
+  }
   assert.deepEqual(allowedResumeActions("decreasing-fatal"), ["extraRounds"]);
-  assert.match(recommendationFor("stalled"), /ヒント/);
-  assert.match(recommendationFor("stalled"), /プラン/);
-  assert.equal(recommendationFor("stalled").includes("追加回数"), false);
   assert.deepEqual(allowedResumeActions("stalled"), ["hint", "replanRemaining"]);
-  assert.match(recommendationFor("changing"), /追加回数/);
-  assert.match(recommendationFor("changing"), /ヒント/);
-  assert.match(recommendationFor("changing"), /再プラン/);
+  assert.deepEqual(mentionedResumeActions(recommendationFor("stalled")), ["hint"]);
+  assert.equal(recommendationFor("stalled").includes("追加回数"), false);
   assert.deepEqual(allowedResumeActions("changing"), ["extraRounds", "hint", "replanRemaining"]);
+  assert.equal(mentionedResumeActions(recommendationFor("changing")).length, 1);
+  assert.ok(allowedResumeActions("changing").includes(mentionedResumeActions(recommendationFor("changing"))[0]!));
   assert.deepEqual(allowedResumeActions("insufficient-requirements"), ["answers"]);
   assert.deepEqual(allowedResumeActions("conflict"), ["continueFromIngest"]);
   assert.deepEqual(allowedResumeActions("branch-deviation"), ["continueFromIngest"]);
@@ -83,8 +99,7 @@ test("停止種類ごとの推奨と再開手段が仕様どおり", () => {
     conflicts: ["shared.txt"],
   });
   assert.deepEqual(conflict.conflicts, ["shared.txt"]);
-  assert.equal(typeof conflict.recommendation, "string");
-  assert.equal(conflict.recommendation.includes("\n"), false);
+  assert.equal(mentionedResumeActions(conflict.recommendation).length, 1);
   assert.equal(makeStopSnapshot({
     kind: "stalled",
     lastOutput: "同じ",

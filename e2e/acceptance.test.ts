@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 
-import { allowedResumeActions, recommendationFor, type StopKind } from "../src/harness/loop-stop.ts";
+import { allowedResumeActions, mentionedResumeActions, recommendationFor, type StopKind } from "../src/harness/loop-stop.ts";
 
 const exec = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "..");
@@ -250,7 +250,9 @@ function assertStop(result: { stop?: { kind: StopKind; recommendation: string; b
   assert.equal(result.stop.recommendation, recommendationFor(kind));
   assert.equal(typeof result.stop.recommendation, "string");
   assert.ok(result.stop.recommendation.length > 0);
-  assert.equal(result.stop.recommendation.includes("\n"), false);
+  const mentioned = mentionedResumeActions(result.stop.recommendation);
+  assert.equal(mentioned.length, 1);
+  assert.ok(allowedResumeActions(kind).includes(mentioned[0]!));
   assert.ok(result.stop.branch);
   assert.equal(result.stop.worktree, result.integrationPath);
   assert.ok(result.stop.lastOutput.length > 0);
