@@ -118,7 +118,7 @@ export async function runRole(options: {
   const { session, extensionsResult } = await createAgentSession({
     cwd: options.cwd,
     agentDir,
-    thinkingLevel: (spec.effort ?? "medium") as any,
+    thinkingLevel: (spec.parameters?.effort ?? "medium") as any,
     modelRuntime,
     resourceLoader,
     tools: options.tools,
