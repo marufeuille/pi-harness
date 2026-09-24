@@ -114,6 +114,16 @@ test("acceptance covers every stop kind, one recommendation, and resume from ano
     kinds.push(decreasingJson.stop.kind);
     assert.equal(decreasingJson.resumeState.originalMaxLoops, 2);
     assert.match(decreasingJson.stop.lastOutput, /fix-a/);
+    const expectedIntegration = decreasingJson.stop.branch;
+    await exec("git", ["-C", decreasingJson.integrationPath, "checkout", "-B", "stray"]);
+    const driftedIntegration = await runScenario(temp, repo, "decreasing-fatal", { review: { maxLoops: 2 } }, ["--resume", decreasingJson.runDir, "--extra-rounds", "1"], { phase: "resume" });
+    assert.equal(driftedIntegration.code, 0, driftedIntegration.stderr);
+    const driftedIntegrationJson = resultJson(driftedIntegration.stdout);
+    assert.equal(driftedIntegrationJson.stop.kind, "branch-deviation");
+    assert.equal(await git(decreasingJson.integrationPath, ["rev-parse", "--abbrev-ref", "HEAD"]), "stray");
+    assert.equal(await readFile(path.join(decreasingJson.integrationPath, "a.txt"), "utf8"), "a\n");
+    await exec("git", ["-C", decreasingJson.integrationPath, "checkout", expectedIntegration]);
+    await writeFile(path.join(decreasingJson.runDir, "loop-state.json"), JSON.stringify(decreasingJson.resumeState, null, 2));
     const extra = await runScenario(temp, repo, "decreasing-fatal", { review: { maxLoops: 2 } }, ["--resume", decreasingJson.runDir, "--extra-rounds", "1"], { phase: "resume" });
     assert.equal(extra.code, 0, extra.stderr);
     const extraJson = resultJson(extra.stdout);
