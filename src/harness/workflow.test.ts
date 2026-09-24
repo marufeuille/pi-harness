@@ -219,6 +219,96 @@ test("同じファイルを触る並列タスクは衝突として人に返す",
   }
 });
 
+test("元プランと同じIDの指摘は通常ループと追加回数の再開で実装する", async () => {
+  const repo = await initRepo();
+  const issue = (id: string, dependsOn: string[] = []) => ({
+    id,
+    title: id,
+    dependsOn,
+    instructions: `${id} を直す`,
+  });
+  try {
+    const loopedIds: string[] = [];
+    let loopReviews = 0;
+    const looped = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 3 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          loopedIds.push(task.id);
+        },
+        review: async () => {
+          loopReviews += 1;
+          if (loopReviews === 1) {
+            return { decision: "fix", issues: [issue("feature")] };
+          }
+          return { decision: "pass", concerns: [] };
+        },
+      }),
+    });
+    assert.equal(looped.status, "ready");
+    assert.deepEqual(loopedIds, ["feature", "feature"]);
+
+    const implemented: string[] = [];
+    let reviews = 0;
+    const first = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 2 } },
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => {
+          reviews += 1;
+          if (reviews === 1) {
+            return { decision: "fix", issues: [issue("feature"), issue("extra", ["feature"])] };
+          }
+          return { decision: "fix", issues: [issue("feature")] };
+        },
+      }),
+    });
+    assert.equal(first.status, "escalated");
+    if (first.status !== "escalated") throw new Error("expected stop");
+    assert.equal(first.stop.kind, "decreasing-fatal");
+    assert.deepEqual(implemented, ["feature", "feature", "extra"]);
+    const resumed = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config: { ...config, review: { maxLoops: 2 } },
+      steps: steps({
+        clarify: async () => {
+          throw new Error("再開で要件確認しない");
+        },
+        plan: async () => {
+          throw new Error("再開で最初からプランしない");
+        },
+        implement: async ({ task }) => {
+          implemented.push(task.id);
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+      resume: { state: first.resumeState, extraRounds: 1 },
+    });
+    assert.equal(resumed.status, "ready");
+    assert.equal(resumed.integrationPath, first.integrationPath);
+    assert.deepEqual(implemented, ["feature", "feature", "extra", "feature"]);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
 test("チェック失敗は安いモデルの修正タスクになり、直ったら検品へ進む", async () => {
   const repo = await initRepo();
   try {
@@ -425,7 +515,8 @@ test("減っている致命的な残件は上限で止まり、追加回数で�
     assert.ok(first.stop.branch);
     assert.match(first.stop.recommendation, /追加回数/);
     assert.equal(first.resumeState.originalMaxLoops, 2);
-    assert.deepEqual(implemented, ["feature", "fix-a", "fix-b"]);
+    assert.equal(implemented[0], "feature");
+    assert.deepEqual([...implemented.slice(1)].sort(), ["fix-a", "fix-b"]);
     const cfg = { ...config, review: { maxLoops: 2 } };
     const stored = await loadLoopState(first.runDir);
     const resumed = await runWorkflow({
@@ -454,7 +545,9 @@ test("減っている致命的な残件は上限で止まり、追加回数で�
     assert.equal(resumed.status, "ready");
     assert.equal(resumed.integrationPath, first.integrationPath);
     assert.equal(resumed.runId, first.runId);
-    assert.deepEqual(implemented, ["feature", "fix-a", "fix-b", "fix-a"]);
+    assert.equal(implemented[3], "fix-a");
+    assert.deepEqual([...implemented.slice(1, 3)].sort(), ["fix-a", "fix-b"]);
+    assert.equal(implemented.length, 4);
     const branches = await git(repo, ["branch"]);
     assert.equal([...branches.matchAll(/integration/g)].length, 1);
   } finally {

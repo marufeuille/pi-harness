@@ -8,6 +8,7 @@ import {
   applyAnswers,
   applyHint,
   assertResumeAllowed,
+  readyFixes,
   readyTasks,
   resumeActionFrom,
   saveLoopState,
@@ -160,7 +161,7 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
 
   run.integration = await openIntegrationWorktree(input.repo, run.runId, run.baseSha);
 
-  const implemented = await implementTasks(run, ticket, plan.tasks);
+  const implemented = await implementTasks(run, ticket, plan.tasks, "plan");
   if (implemented.status === "stopped") {
     return finish(run, stoppedOutcome(run, implemented.kind, implemented.lastOutput, "same", implemented.conflicts));
   }
@@ -231,7 +232,7 @@ async function continueFromState(input: WorkflowInput, ticket: Ticket): Promise<
 
   const pending = run.remaining;
   if (pending.length > 0) {
-    const implemented = await implementTasks(run, ticket, pending);
+    const implemented = await implementTasks(run, ticket, pending, "fix");
     if (implemented.status === "stopped") {
       return finish(run, stoppedOutcome(run, implemented.kind, implemented.lastOutput, "same", implemented.conflicts));
     }
@@ -332,15 +333,17 @@ async function resumeFromIngest(run: Run, ticket: Ticket): Promise<{ status: "im
 
   const planTasks = run.plan?.tasks ?? [];
   const extras = run.remainingTasks.filter((task) => !planTasks.some((item) => item.id === task.id));
-  return implementTasks(run, ticket, [...planTasks, ...extras]);
+  return implementTasks(run, ticket, [...planTasks, ...extras], "plan");
 }
 
 async function implementTasks(
   run: Run,
   ticket: Ticket,
   tasks: Task[],
+  kind: "plan" | "fix",
 ): Promise<{ status: "implemented" } | ImplementStop> {
-  const pending = readyTasks(tasks, new Set(run.completedTaskIds));
+  const completed = new Set(run.completedTaskIds);
+  const pending = kind === "plan" ? readyTasks(tasks, completed) : readyFixes(tasks, completed);
   if (pending.length === 0) {
     return { status: "implemented" };
   }
@@ -458,7 +461,7 @@ async function reviewUntilAcceptable(
       if (attempt === budget) {
         return reviewFailedChecksAtLimit(run, ticket, plan, displayAttempt, cap, checks.output, checkTrend);
       }
-      const fixed = await implementTasks(run, ticket, run.remaining);
+      const fixed = await implementTasks(run, ticket, run.remaining, "fix");
       if (fixed.status === "stopped") {
         return { status: "stop", outcome: stoppedOutcome(run, fixed.kind, fixed.lastOutput, "same", fixed.conflicts) };
       }
@@ -490,7 +493,7 @@ async function reviewUntilAcceptable(
         return { status: "stop", outcome: stoppedOutcome(run, kind, formatIssues(reviewed.issues), trend) };
       }
       phase(`検品の指摘を直す ${displayAttempt}/${cap}`);
-      const fixed = await implementTasks(run, ticket, reviewed.issues);
+      const fixed = await implementTasks(run, ticket, reviewed.issues, "fix");
       if (fixed.status === "stopped") {
         return { status: "stop", outcome: stoppedOutcome(run, fixed.kind, fixed.lastOutput, "same", fixed.conflicts) };
       }
