@@ -191,27 +191,6 @@ export default function profiler(pi: ExtensionAPI) {
     );
   });
 
-  // Cursor emits native operation lifecycle events separately from Pi tool events.
-  // Keep start data pending and write only on completion, so a start notification
-  // can never be mistaken for a successful operation.
-  const nativeCalls = new Map<string, { name: string; input: unknown; startedAt: number }>();
-  pi.on("cursor_operation_start" as any, async (event: any) => {
-    const id = String(event.operationId ?? event.id ?? `${event.operation ?? event.toolName}:${performance.now()}`);
-    nativeCalls.set(id, { name: String(event.operation ?? event.toolName ?? "cursor"), input: event.input ?? event.args ?? {}, startedAt: performance.now() });
-  });
-  pi.on("cursor_operation_end" as any, async (event: any) => {
-    const id = String(event.operationId ?? event.id ?? "");
-    const current = nativeCalls.get(id);
-    if (!current) return;
-    nativeCalls.delete(id);
-    const input = current.input;
-    const target = redact(targetOf(current.name, input) || (input && typeof input === "object" ? (input as any).path ?? (input as any).command ?? (input as any).pattern ?? "" : ""));
-    const output = event.result ?? event.output ?? "";
-    write({ timestamp: new Date().toISOString(), type: "tool", toolCallId: id, toolName: current.name, operation: current.name, target,
-      durationMs: Math.round(performance.now() - current.startedAt), inputChars: sizeOf(input), outputChars: sizeOf(output),
-      inputHash: hash({ tool: current.name, input }), duplicateInputCount: 1, isError: Boolean(event.isError ?? event.error),
-      ...(event.isError || event.error ? { errorOutput: redact(event.error ?? output) } : {}) });
-  });
   /*
    * Tool実行後
    */
