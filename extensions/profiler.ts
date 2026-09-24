@@ -228,14 +228,16 @@ export default function profiler(pi: ExtensionAPI) {
    */
   pi.on("agent_end", async (event) => {
     const messages = (event as any)?.messages;
-    const last = Array.isArray(messages) ? messages.at(-1) : undefined;
+    const last = Array.isArray(messages)
+      ? [...messages].reverse().find((message: any) => message?.role === "assistant")
+      : undefined;
     const text = typeof last?.content === "string" ? last.content : Array.isArray(last?.content)
       ? last.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\\n")
       : "";
     write({
       timestamp: new Date().toISOString(),
       type: "agent_end",
-      assistantText: safeText(text),
+      assistantText: safeText(text, Number.POSITIVE_INFINITY),
     });
   });
 

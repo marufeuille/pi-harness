@@ -6,6 +6,28 @@ import test from "node:test";
 
 import profiler from "./profiler.ts";
 
+test("agent_end records full last assistant text, not trailing tool result", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "profiler-test-"));
+  const handlers = new Map<string, (event: any, ctx?: any) => Promise<void>>();
+  const pi = { on: (name: string, handler: (event: any, ctx?: any) => Promise<void>) => handlers.set(name, handler) } as any;
+
+  try {
+    profiler(pi);
+    await handlers.get("session_start")!({}, { cwd });
+    const assistantText = JSON.stringify({ assumptions: ["x".repeat(700)] });
+    await handlers.get("agent_end")!({ messages: [
+      { role: "assistant", content: assistantText },
+      { role: "toolResult", content: "tool output" },
+    ] });
+    const log = fs.readdirSync(path.join(cwd, ".pi-observability"))[0];
+    const records = fs.readFileSync(path.join(cwd, ".pi-observability", log), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(records.find((record) => record.type === "agent_end").assistantText, assistantText);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("SDK-shaped tool events record sizes and duplicate counts by input", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "profiler-test-"));
   const handlers = new Map<string, (event: any, ctx?: any) => Promise<void>>();
