@@ -2,13 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { applyStreamOptions, assertWriteAllowed, toolsFor } from "./session.ts";
 
-test("fast invocation setting reaches the model stream boundary, including false and default true", () => {
-  for (const fast of [true, false, undefined]) {
+test("fast options reach the SDK runtime streamSimple boundary, including false", () => {
+  for (const fast of [true, false]) {
     let received: Record<string, unknown> | undefined;
-    const model = { stream(_request: unknown, options: Record<string, unknown> = {}) { received = options; } };
-    applyStreamOptions(model, { fast: fast ?? true });
-    model.stream({});
-    assert.equal(received?.fast, fast ?? true);
+    const model = { provider: "xai", id: "grok-4.7" };
+    const runtime = {
+      streamSimple(_model: unknown, _context: unknown, options: Record<string, unknown> = {}) {
+        received = options;
+      },
+    };
+    assert.equal("stream" in model, false);
+    applyStreamOptions(runtime, { fast });
+    runtime.streamSimple(model, { messages: [] }, { temperature: 0.2 });
+    assert.deepEqual(received, { temperature: 0.2, fast });
   }
 });
 
