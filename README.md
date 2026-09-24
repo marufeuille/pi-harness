@@ -23,7 +23,7 @@ LINEAR_API_KEY='your-linear-api-key' npm run harness -- --linear https://linear.
 
 `grok` は `pi-cursor-sdk` の Cursor プロバイダ経由で `cursor/grok-4.6` を使います。認証には `CURSOR_API_KEY` 環境変数、または Pi の認証保存先である `.pi-clean` に保存した Cursor API キーを使ってください。キーをリポジトリに置かないでください。Cursor デスクトップや Cursor エージェント CLI へのログイン、xAI の API キーは不要です。
 
-設定の `models.cursorGrokId` で `cursor/grok-4.6` のような ID を指定できます。省略時は既定 ID が使われます。設定解析時には `cursor/<model-id>` の構文のみ検証し、ID の実在確認は行いません。利用可能な ID は実行時に Cursor が返す一覧に限られ、一覧外の ID はプロンプト送信前に失敗します。
+設定の `models.cursorGrokId` で `cursor/grok-4.6` のような ID を指定できます。省略時は既定 ID が使われます。grok に割り当てた段階ではこの設定値を使います。設定解析時には `cursor/<model-id>` の構文のみ検証し、ID の実在確認は行いません。利用可能な ID は実行時に Cursor が返す一覧に限られ、一覧外の ID はプロンプト送信前に失敗します。
 
 ## セッションログ
 
