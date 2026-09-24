@@ -13,6 +13,11 @@ const harnessRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 const ticketPath = readArg("--ticket");
 const linearId = readArg("--linear");
+const baseRevision = readArg("--base");
+if (process.argv.includes("--base") && (!baseRevision || baseRevision.startsWith("--"))) {
+  process.stderr.write("--base には空でないリビジョンを指定してください\n");
+  process.exit(1);
+}
 const repo = path.resolve(readArg("--repo") ?? process.cwd());
 const configPath = path.resolve(readArg("--config") ?? path.join(harnessRoot, "config", "harness.json"));
 
@@ -53,12 +58,16 @@ const input = {
   ...(ticket ? { ticket } : { ticketPath: path.resolve(ticketPath!) }),
   config,
   steps: createDefaultSteps(config, fixture),
-};
+  ...(baseRevision ? { baseRevision } : {}),
+} as Parameters<typeof runWorkflow>[0] & { baseRevision?: string };
 if (linearId) {
   const outcome = await runLinearLifecycle({
     issueId: linearId,
     updateLinearIssueState: updateLinearStateResult,
-    runWorkflow: () => runWorkflow(input),
+    runWorkflow: () => runWorkflow(input).catch((error) => {
+      process.stderr.write(`起点を解決できません: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exit(1);
+    }),
   });
   if (!outcome.ok) {
     process.stderr.write(`Linear の状態を更新できません: ${outcome.reason}\n`);
@@ -66,7 +75,13 @@ if (linearId) {
   }
   process.stdout.write(`${JSON.stringify(outcome.result, null, 2)}\n`);
 } else {
-  const result = await runWorkflow(input);
+  let result;
+  try {
+    result = await runWorkflow(input);
+  } catch (error) {
+    process.stderr.write(`起点を解決できません: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
