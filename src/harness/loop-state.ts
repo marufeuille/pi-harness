@@ -26,6 +26,7 @@ export type LoopState = {
   plan: TaskPlan;
   originalMaxLoops: number;
   stopKind: StopKind;
+  shouldPublishBase?: boolean;
 };
 
 export type ResumeAction =
@@ -106,6 +107,17 @@ export function resumeActionFrom(input: ResumeInput): ResumeAction {
   return actions[0]!;
 }
 
+export function dedicatedBaseBranch(runId: string): string {
+  return `harness/${runId}/base`;
+}
+
+export function shouldPublishBaseFrom(state: Pick<LoopState, "shouldPublishBase" | "baseBranch" | "runId">): boolean {
+  if (typeof state.shouldPublishBase === "boolean") {
+    return state.shouldPublishBase;
+  }
+  return state.baseBranch === dedicatedBaseBranch(state.runId);
+}
+
 export function assertResumeAllowed(kind: StopKind, action: ResumeAction): void {
   const allowed = allowedResumeActions(kind);
   const name = actionName(action);
@@ -161,7 +173,8 @@ function isLoopState(value: unknown): value is LoopState {
     Array.isArray(record.remainingTasks) &&
     typeof record.ingestPosition === "number" &&
     record.ticket !== undefined &&
-    record.plan !== undefined
+    record.plan !== undefined &&
+    (record.shouldPublishBase === undefined || typeof record.shouldPublishBase === "boolean")
   );
 }
 
