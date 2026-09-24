@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { WorkflowConfig } from "./config.ts";
@@ -16,18 +16,22 @@ import { mergePullRequestWhenReady } from "./merge.ts";
 import { runGit } from "./worktrees.ts";
 import { runRole, toolsFor, type OfflineFixture } from "./session.ts";
 import { maskSecrets } from "./mask.ts";
+import { modelCatalog } from "./models.ts";
 
 const execFileAsync = promisify(execFile);
 
 export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixture): Steps {
   const smart = config.models.smart;
   const cheap = config.models.cheap;
+  const modelFor = (alias: typeof smart) => alias === "grok" && config.models.cursorGrokId
+    ? { ...modelCatalog.grok, id: config.models.cursorGrokId }
+    : alias;
 
   return {
     async clarify({ ticket, cwd }) {
       const text = await runRole({
         role: "smart", fixture, stage: "clarify",
-        model: smart,
+        model: modelFor(smart),
         cwd,
         tools: toolsFor("read"),
         prompt: [
@@ -53,7 +57,7 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
     async plan({ ticket, assumptions, cwd }) {
       const text = await runRole({
         role: "smart", fixture, stage: "plan",
-        model: smart,
+        model: modelFor(smart),
         cwd,
         tools: toolsFor("read"),
         prompt: [
@@ -81,7 +85,7 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
     async implement({ task, worktree, ticket }) {
       await runRole({
         role: "cheap", fixture, stage: "implement",
-        model: cheap,
+        model: modelFor(cheap),
         cwd: worktree.path,
         tools: toolsFor("edit"),
         prompt: [
@@ -102,12 +106,13 @@ export function createDefaultSteps(config: WorkflowConfig, fixture?: OfflineFixt
     async review({ ticket, plan, attempt, maxLoops, cwd, baseSha }) {
       const text = await runRole({
         role: "smart", fixture, stage: "review",
-        model: smart,
+        model: modelFor(smart),
         cwd,
-        tools: toolsFor("read").concat("bash"),
+        tools: toolsFor("read"),
         prompt: [
           "実装がチケットの要求を満たしているか検品してください。",
-          `変更は git diff ${baseSha} で見られます。`,
+          "以下はハーネスが安全な読み取り専用経路で取得した差分です。",
+          execFileSync("git", ["diff", "--no-ext-diff", baseSha, "--"], { cwd, encoding: "utf8" }),
           "直すべきなのは、要求との不一致と重大なセキュリティ上の問題だけです。",
           "記法、わずかな非効率、確率の低い懸念は concerns に残さず捨ててください。",
           `これは ${attempt} 回目で、上限は ${maxLoops} 回です。`,

@@ -229,6 +229,7 @@ export default function profiler(pi: ExtensionAPI) {
       duplicateInputCount,
 
       isError: event.isError ?? false,
+      operation: current.toolName,
       target: current.target,
       ...(event.isError ? { errorOutput: redact((event as any).content?.map?.((item: any) => item.text ?? "").join("\n") ?? event.content) } : {}),
     };

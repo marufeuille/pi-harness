@@ -6,6 +6,7 @@ export type WorkflowConfig = {
   models: {
     smart: ModelAlias;
     cheap: ModelAlias;
+    cursorGrokId?: string;
   };
   phases: {
     pullRequest: boolean;
@@ -35,6 +36,9 @@ export function parseConfig(raw: unknown): WorkflowConfig {
     models: {
       smart: alias(models.smart, "models.smart"),
       cheap: alias(models.cheap, "models.cheap"),
+      ...(models.cursorGrokId === undefined
+        ? {}
+        : { cursorGrokId: cursorModelId(models.cursorGrokId, "models.cursorGrokId") }),
     },
     phases: {
       pullRequest: booleanFlag(phases.pullRequest, "phases.pullRequest"),
@@ -73,6 +77,13 @@ function alias(value: unknown, label: string): ModelAlias {
     return value as ModelAlias;
   }
   throw new Error(`${label} は ${Object.keys(modelCatalog).join(" / ")} のいずれかにしてください`);
+}
+
+function cursorModelId(value: unknown, label: string): string {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+  throw new Error(`${label} は空でない文字列にしてください`);
 }
 
 function booleanFlag(value: unknown, label: string): boolean {
