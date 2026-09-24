@@ -1,17 +1,17 @@
 {
   "models": {
     "smart": { "provider": "openai-codex", "id": "gpt-6-astra", "parameters": { "effort": "high" } },
-    "cheap": { "provider": "cursor", "id": "grok-4.6", "parameters": { "effort": "xhigh", "fast": false } },
+    "cheap": { "provider": "cursor", "id": "grok-4.6", "parameters": { "effort": "medium" } },
     "cursorGrokId": "grok-4.6"
   },
   "phases": {
-    "pullRequest": true,
+    "pullRequest": false,
     "requireCi": false,
-    "merge": true,
+    "merge": false,
     "productionCheck": false
   },
   "review": {
-    "maxLoops": 7
+    "maxLoops": 3
   },
   "checks": []
 }
