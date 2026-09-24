@@ -4,10 +4,15 @@ Markdown チケットまたは Linear 課題を入力し、Pi のセッション
 
 ```bash
 npm test
+npm run test:e2e
 npm run harness -- --ticket fixtures/sample-ticket.md --repo /path/to/git/app
 LINEAR_API_KEY='your-linear-api-key' npm run harness -- --linear ABC-123 --repo /path/to/git/app
 LINEAR_API_KEY='your-linear-api-key' npm run harness -- --linear https://linear.app/acme/issue/ABC-123/example --repo /path/to/git/app
 ```
+
+## E2E テスト
+
+`npm run test:e2e` は単体テストと独立して実行します。テスト自身が Markdown チケット、固定応答 JSON、専用の外部フェーズ無効設定、および一時 git リポジトリを作り、`npm run harness` と同じ入口を子プロセスで起動します。API キー不要でモデル API・Linear・GitHub へ接続せず、明確なチケットの実装取り込みと `ready`、曖昧なチケットの質問と `returned`、未実装を検証します。一時データは終了時に削除され、子プロセスには120秒の上限があります。`npm test` には含まれません。
 
 ## セッションログ
 
