@@ -57,6 +57,11 @@ test("masks JSON AWS secret keys and curl user credentials in every supported fo
   assert.match(masked, /curl --user=\\[REDACTED\\]/);
 });
 
+test("masks AWS environment variable assignments", () => {
+  const masked = maskSecrets("AWS_SECRET_ACCESS_KEY=example-sensitive-aws-secret aws sts get-caller-identity");
+  assert.ok(!masked.includes("example-sensitive-aws-secret"));
+});
+
 test("masks quoted credentials in malformed JSON-like text", () => {
   const input = '{"api_key":"abc123", "access_token":"token123", "password":"hunter 2 rocks",';
   const masked = maskSecrets(input);
