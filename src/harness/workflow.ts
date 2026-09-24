@@ -5,6 +5,7 @@ import type { WorkflowConfig } from "./config.ts";
 import type { Plan, PullRequest, Steps, Task, Ticket } from "./contract.ts";
 import { archiveProfilerLogs } from "./observability.ts";
 import { schedule } from "./schedule.ts";
+import { maskSecrets } from "./mask.ts";
 import { loadTicket } from "./ticket.ts";
 import {
   commitsAhead,
@@ -66,14 +67,12 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
 
   phase("要件を確認する");
   let clarification;
-  try {
-    clarification = await input.steps.clarify({ ticket, cwd: input.repo });
-  } catch (error) {
-    if (!recordJsonFailure(run, error, "clarify", 1)) throw error;
-    await keepLogs(run, "clarify", input.repo);
+  clarification = await input.steps.clarify({ ticket, cwd: input.repo });
+  await keepLogs(run, "clarify", input.repo);
+  if ("decision" in clarification && clarification.decision === "json-read-failed") {
+    recordJsonFailure(run, clarification);
     return finish(run, { status: "returned", questions: ["要件確認の返答から JSON を読み取れませんでした"] });
   }
-  await keepLogs(run, "clarify", input.repo);
   if (clarification.decision === "return") {
     return finish(run, { status: "returned", questions: clarification.questions });
   }
@@ -85,14 +84,12 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
 
   phase("プランを作る");
   let plan;
-  try {
-    plan = await input.steps.plan({ ticket, assumptions: clarification.assumptions, cwd: input.repo });
-  } catch (error) {
-    if (!recordJsonFailure(run, error, "plan", 1)) throw error;
-    await keepLogs(run, "plan", input.repo);
+  plan = await input.steps.plan({ ticket, assumptions: clarification.assumptions, cwd: input.repo });
+  await keepLogs(run, "plan", input.repo);
+  if ("decision" in plan && plan.decision === "json-read-failed") {
+    recordJsonFailure(run, plan);
     return finish(run, { status: "returned", questions: ["プランの返答から JSON を読み取れませんでした"] });
   }
-  await keepLogs(run, "plan", input.repo);
 
   run.integration = await openIntegrationWorktree(input.repo, run.runId);
   run.baseSha = await headSha(run.integration.path);
@@ -243,15 +240,13 @@ async function reviewUntilAcceptable(
 
     phase(`検品する ${attempt}/${maxLoops}`);
     let review;
-    try {
-      review = await run.steps.review({ ticket, plan, attempt, maxLoops, cwd: integration(run).path, baseSha: run.baseSha });
-    } catch (error) {
-      if (!recordJsonFailure(run, error, "review", attempt)) throw error;
-      await keepLogs(run, `review-${attempt}`, integration(run).path);
+    review = await run.steps.review({ ticket, plan, attempt, maxLoops, cwd: integration(run).path, baseSha: run.baseSha });
+    await keepLogs(run, `review-${attempt}`, integration(run).path);
+    if (review.decision === "json-read-failed") {
+      recordJsonFailure(run, review);
       if (attempt === maxLoops) return { decision: "escalate", reason: "修正ループの上限に達したため、人に戻します" };
       continue;
     }
-    await keepLogs(run, `review-${attempt}`, integration(run).path);
     if (review.decision === "pass" || review.decision === "escalate") {
       return review;
     }
@@ -300,17 +295,8 @@ async function keepLogs(run: Run, label: string, cwd: string): Promise<void> {
   await archiveProfilerLogs(cwd, path.join(run.runDir, "observability", label), run.startedAt);
 }
 
-function recordJsonFailure(run: Run, error: unknown, stage: string, attempt: number): boolean {
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as { name?: unknown; text?: unknown; rawText?: unknown; stage?: unknown; attempt?: unknown };
-  if (candidate.name !== "JsonReadFailure" && typeof candidate.text !== "string" && typeof candidate.rawText !== "string") return false;
-  const text = typeof candidate.text === "string" ? candidate.text : typeof candidate.rawText === "string" ? candidate.rawText : "";
-  run.jsonReadFailures.push({ stage: typeof candidate.stage === "string" ? candidate.stage : stage, attempt: typeof candidate.attempt === "number" ? candidate.attempt : attempt, text: maskSecrets(text) });
-  return true;
-}
-
-function maskSecrets(text: string): string {
-  return text.replace(/(?:api[_-]?key|token|secret|password)(\\s*[:=]\\s*)([\\"']?)[^\\s,\\"'}`]+/gi, "$1$2[REDACTED]");
+function recordJsonFailure(run: Run, failure: import("./contract.ts").JsonReadFailure): void {
+  run.jsonReadFailures.push({ stage: failure.stage, attempt: failure.attempt, text: maskSecrets(failure.text) });
 }
 
 function finish(run: Run, result: Outcome): WorkflowResult {
