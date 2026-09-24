@@ -33,11 +33,14 @@ if (Boolean(ticketPath) === Boolean(linearId)) {
 }
 
 const config = await loadConfig(configPath);
-try {
-  await validateCursorModels(config);
-} catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
+// 固定応答はモデルを呼ばない。Cursor の認証とモデル一覧は確認しない。
+if (!process.env.HARNESS_E2E_FIXTURE) {
+  try {
+    await validateCursorModels(config);
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
 }
 
 let ticket;
