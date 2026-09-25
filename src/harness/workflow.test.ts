@@ -80,6 +80,70 @@ test("指定 SHA/タグは main の更新に影響されず、PR は指定起点
   } finally { await rm(repo, { recursive: true, force: true }); }
 });
 
+test("--base 指定で停止した専用ベースは別プロセス再開後の PR でも公開する", async () => {
+  const repo = await initRepo();
+  const issue = { id: "fix-a", title: "境界", dependsOn: [] as string[], instructions: "空白を拒否する" };
+  try {
+    const selected = await git(repo, ["rev-parse", "HEAD"]);
+    await git(repo, ["tag", "chosen"]);
+    await addCommit(repo, "new.txt", "new\n");
+    await git(repo, ["push", "origin", "main"]);
+    const prConfig = { ...config, review: { maxLoops: 1 }, phases: { ...config.phases, pullRequest: true } };
+    const first = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      baseRevision: "chosen",
+      config: prConfig,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [{ id: "feature", title: "機能", dependsOn: [], instructions: "機能" }],
+        }),
+        implement: async () => {},
+        review: async () => ({ decision: "fix", issues: [issue] }),
+      }),
+    });
+    assert.equal(first.status, "escalated");
+    if (first.status !== "escalated") throw new Error("expected stop");
+    assert.equal(first.resumeState.shouldPublishBase, true);
+    assert.equal(first.resumeState.baseBranch, `harness/${first.runId}/base`);
+    await assert.rejects(git(repo, ["rev-parse", `refs/remotes/origin/${first.resumeState.baseBranch}`]));
+
+    const stored = await loadLoopState(first.runDir);
+    assert.equal(stored.shouldPublishBase, true);
+    assert.equal(stored.baseBranch, first.resumeState.baseBranch);
+    let pr: { baseBranch: string } | undefined;
+    const resumed = await runWorkflow({
+      repo,
+      config: prConfig,
+      steps: steps({
+        clarify: async () => {
+          throw new Error("再開で要件確認しない");
+        },
+        plan: async () => {
+          throw new Error("再開で最初からプランしない");
+        },
+        implement: async () => {},
+        review: async () => ({ decision: "pass", concerns: [] }),
+        openPullRequest: async (args) => {
+          pr = { baseBranch: args.baseBranch };
+          return { url: "https://example.test/pr/1", number: 1 };
+        },
+      }),
+      resume: { state: stored, extraRounds: 1 },
+    });
+    assert.equal(resumed.status, "ready");
+    assert.equal(resumed.runId, first.runId);
+    assert.equal(resumed.integrationPath, first.integrationPath);
+    assert.ok(pr);
+    assert.equal(pr.baseBranch, first.resumeState.baseBranch);
+    assert.equal(await git(repo, ["rev-parse", `refs/remotes/origin/${pr.baseBranch}`]), selected);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
 test("起点の取得・解決に失敗したら処理も worktree 作成も行わない", async () => {
   for (const failure of ["fetch", "revision"] as const) {
     const repo = await initRepo();

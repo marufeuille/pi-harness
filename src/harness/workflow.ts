@@ -8,10 +8,12 @@ import {
   applyAnswers,
   applyHint,
   assertResumeAllowed,
+  dedicatedBaseBranch,
   readyFixes,
   readyTasks,
   resumeActionFrom,
   saveLoopState,
+  shouldPublishBaseFrom,
   type LoopState,
   type ResumeAction,
   type ResumeInput,
@@ -131,8 +133,9 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
   const run = beginRun(input);
   run.ticket = ticket;
   const base = await resolveBase(input.repo, input.baseRevision);
-  run.baseBranch = input.baseRevision ? `harness/${run.runId}/base` : base.branch;
+  run.baseBranch = input.baseRevision ? dedicatedBaseBranch(run.runId) : base.branch;
   run.baseSha = base.sha;
+  run.shouldPublishBase = Boolean(input.baseRevision);
 
   phase("要件を確認する");
   let clarification;
@@ -159,7 +162,6 @@ export async function runWorkflow(input: WorkflowInput): Promise<WorkflowResult>
   }
   run.plan = plan;
   run.assumptions = [...clarification.assumptions, ...plan.assumptions];
-  run.shouldPublishBase = Boolean(input.baseRevision);
 
   run.integration = await openIntegrationWorktree(input.repo, run.runId, run.baseSha);
 
@@ -631,7 +633,7 @@ function resumeRun(input: WorkflowInput, state: LoopState, action: ResumeAction)
     history: [...state.history],
     originalMaxLoops: state.originalMaxLoops,
     loopBudget: "extraRounds" in action ? action.extraRounds : state.originalMaxLoops,
-    shouldPublishBase: false,
+    shouldPublishBase: shouldPublishBaseFrom(state),
     ...(linearIssueId ? { linearIssueId } : {}),
   };
 }
@@ -731,6 +733,7 @@ function captureState(run: Run, stopKind: StopKind): LoopState {
     plan: run.plan,
     originalMaxLoops: run.originalMaxLoops,
     stopKind,
+    shouldPublishBase: run.shouldPublishBase,
     ...(run.linearIssueId ? { linearIssueId: run.linearIssueId } : {}),
   };
 }

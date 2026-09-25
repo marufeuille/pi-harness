@@ -9,11 +9,13 @@ import {
   applyAnswers,
   applyHint,
   assertResumeAllowed,
+  dedicatedBaseBranch,
   loadLoopState,
   readyFixes,
   readyTasks,
   resumeActionFrom,
   saveLoopState,
+  shouldPublishBaseFrom,
   type LoopState,
 } from "./loop-state.ts";
 import type { StopKind } from "./loop-stop.ts";
@@ -111,14 +113,16 @@ test("回答は仮定へ足し、ヒントは残件へ足し、再プラン対�
 
 test("再開状態を runDir に保存する", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "loop-state-"));
-  const value = state("decreasing-fatal", { runDir: dir });
+  const value = state("decreasing-fatal", { runDir: dir, shouldPublishBase: true, baseBranch: dedicatedBaseBranch("run") });
   await saveLoopState(dir, value);
   const stored = JSON.parse(await readFile(path.join(dir, "loop-state.json"), "utf8")) as LoopState;
   assert.equal(stored.stopKind, "decreasing-fatal");
   assert.equal(stored.originalMaxLoops, 3);
   assert.equal(stored.integrationBranch, "harness/run/integration");
+  assert.equal(stored.shouldPublishBase, true);
   const loaded = await loadLoopState(dir);
   assert.equal(loaded.runId, "run");
+  assert.equal(loaded.shouldPublishBase, true);
   assert.equal((await loadLoopState(path.join(dir, "loop-state.json"))).stopKind, "decreasing-fatal");
 });
 
@@ -130,4 +134,15 @@ test("Linear 識別情報を保存して読み戻す", async () => {
   assert.equal(loaded.linearIssueId, "ABC-1");
   await writeFile(path.join(dir, "loop-state.json"), JSON.stringify({ ...value, linearIssueId: "" }));
   await assert.rejects(loadLoopState(dir), /形式が不正/);
+});
+
+test("専用ベースの公開要否は保存値を優先し、無ければベース情報から決める", () => {
+  assert.equal(shouldPublishBaseFrom(state("decreasing-fatal", { shouldPublishBase: true })), true);
+  assert.equal(shouldPublishBaseFrom(state("decreasing-fatal", { shouldPublishBase: false, baseBranch: dedicatedBaseBranch("run") })), false);
+  const unnamed = state("decreasing-fatal", { baseBranch: dedicatedBaseBranch("run") });
+  delete unnamed.shouldPublishBase;
+  assert.equal(shouldPublishBaseFrom(unnamed), true);
+  const main = state("decreasing-fatal", { baseBranch: "main" });
+  delete main.shouldPublishBase;
+  assert.equal(shouldPublishBaseFrom(main), false);
 });
