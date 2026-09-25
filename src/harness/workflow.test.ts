@@ -240,9 +240,15 @@ test("依存のないタスクは worktree で重ね、依存タスクは取り�
   }
 });
 
-test("同じファイルを触る並列タスクは衝突として人に返す", async () => {
+test("同じ行を編集する兄弟は先の取り込みを見てから続き、先の変更を残す", async () => {
   const repo = await initRepo();
   try {
+    await addCommit(repo, "shared.txt", "one\ntwo\nthree\nfour\nfive\n");
+    await git(repo, ["push", "origin", "main"]);
+    let active = 0;
+    let maxActive = 0;
+    const calls: Record<string, number> = { left: 0, right: 0 };
+    const seen: string[] = [];
     const result = await runWorkflow({
       repo,
       ticketPath: await writeTicket(),
@@ -252,33 +258,156 @@ test("同じファイルを触る並列タスクは衝突として人に返す",
         plan: async () => ({
           assumptions: [],
           tasks: [
-            { id: "left", title: "left", dependsOn: [], instructions: "left" },
             { id: "right", title: "right", dependsOn: [], instructions: "right" },
+            { id: "left", title: "left", dependsOn: [], instructions: "left" },
           ],
         }),
         implement: async ({ task, worktree }) => {
-          await writeFile(path.join(worktree.path, "shared.txt"), task.id);
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          calls[task.id] += 1;
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          const file = path.join(worktree.path, "shared.txt");
+          const lines = (await readFile(file, "utf8")).split("\n");
+          if (lines[2] !== "three") seen.push(`${task.id}:${lines[2]}`);
+          lines[2] = lines[2] === "three" ? task.id : `${lines[2]}+${task.id}`;
+          await writeFile(file, lines.join("\n"));
+          active -= 1;
         },
-        review: async () => {
-          throw new Error("衝突したら検品まで進まない");
-        },
+        review: async () => ({ decision: "pass", concerns: [] }),
       }),
     });
-    assert.equal(result.status, "escalated");
-    if (result.status === "escalated") {
-      assert.equal(result.stop.kind, "conflict");
-      assert.match(result.reason, /衝突/);
-      assert.match(result.stop.lastOutput, /衝突/);
-      assert.equal(result.stop.worktree, result.integrationPath);
-      assert.ok(result.stop.branch);
-      assert.match(result.stop.recommendation, /取り込み/);
-      assert.ok(result.resumeState);
-      assert.ok(result.resumeState.remainingTasks.length > 0);
-      assert.deepEqual(result.stop.conflicts, ["shared.txt"]);
-      assert.ok(result.resumeState.completedTaskIds.includes("left"));
-      assert.equal(result.resumeState.completedTaskIds.includes("right"), false);
-      assert.equal(await readFile(path.join(result.runDir, "tasks", "right", "shared.txt"), "utf8"), "right");
-    }
+    assert.equal(result.status, "ready");
+    assert.equal(maxActive, 2);
+    assert.equal(calls.left, 1);
+    assert.equal(calls.right, 2);
+    assert.deepEqual(seen, ["right:left"]);
+    assert.ok(result.integrationPath);
+    assert.match(await readFile(path.join(result.integrationPath, "shared.txt"), "utf8"), /^one\ntwo\nleft\+right\nfour\nfive\n$/);
+    const log = await git(result.integrationPath, ["log", "--format=%s"]);
+    assert.match(log, /harness: left left/);
+    assert.match(log, /harness: right right/);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("ファイルが重ならないタスクは同じ波で1回ずつ並列に実装する", async () => {
+  const repo = await initRepo();
+  try {
+    let active = 0;
+    let maxActive = 0;
+    const calls: Record<string, number> = { alpha: 0, beta: 0 };
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [
+            { id: "beta", title: "beta", dependsOn: [], instructions: "beta" },
+            { id: "alpha", title: "alpha", dependsOn: [], instructions: "alpha" },
+          ],
+        }),
+        implement: async ({ task, worktree }) => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          calls[task.id] += 1;
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          await writeFile(path.join(worktree.path, `${task.id}.txt`), task.id);
+          active -= 1;
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+    });
+    assert.equal(result.status, "ready");
+    assert.equal(maxActive, 2);
+    assert.deepEqual(calls, { alpha: 1, beta: 1 });
+    assert.ok(result.integrationPath);
+    assert.equal(await readFile(path.join(result.integrationPath, "alpha.txt"), "utf8"), "alpha");
+    assert.equal(await readFile(path.join(result.integrationPath, "beta.txt"), "utf8"), "beta");
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("同じファイルの別の行は衝突させず、実装は1回のまま両方残る", async () => {
+  const repo = await initRepo();
+  try {
+    await addCommit(repo, "shared.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n");
+    await git(repo, ["push", "origin", "main"]);
+    const calls: Record<string, number> = { top: 0, bottom: 0 };
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [
+            { id: "bottom", title: "bottom", dependsOn: [], instructions: "bottom" },
+            { id: "top", title: "top", dependsOn: [], instructions: "top" },
+          ],
+        }),
+        implement: async ({ task, worktree }) => {
+          calls[task.id] += 1;
+          const file = path.join(worktree.path, "shared.txt");
+          const lines = (await readFile(file, "utf8")).split("\n");
+          if (task.id === "top") lines[0] = "TOP";
+          if (task.id === "bottom") lines[9] = "BOTTOM";
+          await writeFile(file, lines.join("\n"));
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+    });
+    assert.equal(result.status, "ready");
+    assert.deepEqual(calls, { top: 1, bottom: 1 });
+    assert.ok(result.integrationPath);
+    const shared = await readFile(path.join(result.integrationPath, "shared.txt"), "utf8");
+    assert.match(shared, /^TOP\n/);
+    assert.match(shared, /\nBOTTOM\n$/);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test("3つの同じ行は先に入った順に変更を見て続く", async () => {
+  const repo = await initRepo();
+  try {
+    await addCommit(repo, "shared.txt", "one\ntwo\nthree\nfour\nfive\n");
+    await git(repo, ["push", "origin", "main"]);
+    const seen: string[] = [];
+    const result = await runWorkflow({
+      repo,
+      ticketPath: await writeTicket(),
+      config,
+      steps: steps({
+        clarify: async () => ({ decision: "proceed", assumptions: [] }),
+        plan: async () => ({
+          assumptions: [],
+          tasks: [
+            { id: "c", title: "c", dependsOn: [], instructions: "c" },
+            { id: "a", title: "a", dependsOn: [], instructions: "a" },
+            { id: "b", title: "b", dependsOn: [], instructions: "b" },
+          ],
+        }),
+        implement: async ({ task, worktree }) => {
+          const file = path.join(worktree.path, "shared.txt");
+          const lines = (await readFile(file, "utf8")).split("\n");
+          if (lines[2] !== "three") seen.push(`${task.id}:${lines[2]}`);
+          lines[2] = lines[2] === "three" ? task.id : `${lines[2]}+${task.id}`;
+          await writeFile(file, lines.join("\n"));
+        },
+        review: async () => ({ decision: "pass", concerns: [] }),
+      }),
+    });
+    assert.equal(result.status, "ready");
+    assert.deepEqual(seen, ["b:a", "c:a+b"]);
+    assert.ok(result.integrationPath);
+    assert.match(await readFile(path.join(result.integrationPath, "shared.txt"), "utf8"), /^one\ntwo\na\+b\+c\nfour\nfive\n$/);
   } finally {
     await rm(repo, { recursive: true, force: true });
   }
@@ -1035,7 +1164,15 @@ test("衝突の再開は未解消なら再停止し、解消済みなら取り�
           ],
         }),
         implement: async ({ task, worktree }) => {
-          await writeFile(path.join(worktree.path, "shared.txt"), task.id);
+          const file = path.join(worktree.path, "shared.txt");
+          const current = await readFile(file, "utf8").catch(() => "");
+          if (task.id === "right" && current === "left") {
+            const integrationPath = path.resolve(worktree.path, "../../integration");
+            await writeFile(path.join(integrationPath, "shared.txt"), "moved\n");
+            await git(integrationPath, ["add", "shared.txt"]);
+            await git(integrationPath, ["commit", "-m", "move integration"]);
+          }
+          await writeFile(file, task.id);
         },
         review: async () => {
           throw new Error("衝突したら検品まで進まない");

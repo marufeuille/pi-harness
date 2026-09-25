@@ -371,22 +371,7 @@ async function implementTasks(
     }
 
     const outcomes = await Promise.all(
-      prepared.map(async ({ task, worktree, skipImplement }) => {
-        if (!skipImplement) {
-          const logsBefore = await profilerLogFiles(worktree.path);
-          await run.steps.implement({ task, worktree, ticket });
-          await keepLogs(run, task.id, worktree.path, logsBefore);
-        }
-        const verified = await verifyWorktreeBranch(worktree);
-        if (!verified.ok) {
-          return {
-            ok: false as const,
-            reason: `${task.id} の${verified.reason}`,
-          };
-        }
-        await commitAll(worktree.path, `harness: ${task.id} ${task.title}`);
-        return { ok: true as const, task, worktree };
-      }),
+      prepared.map(({ task, worktree, skipImplement }) => runTask(run, ticket, task, worktree, skipImplement)),
     );
 
     for (const outcome of outcomes) {
@@ -401,25 +386,12 @@ async function implementTasks(
         run.remaining = leftover();
         return drifted;
       }
-      const ahead = await commitsAhead(outcome.worktree.path, integration(run).branch, outcome.worktree.branch);
-      if (ahead === 0) {
-        await removeTask(run, outcome.worktree);
-        mergedIds.add(outcome.task.id);
-        markIngested(run, outcome.task.id);
-        continue;
-      }
-      const merged = await mergeBranch(integration(run), outcome.worktree.branch);
-      if (!merged.ok) {
+      const landed = await landTask(run, ticket, outcome.task, outcome.worktree);
+      if (landed.status === "stopped") {
         run.remainingTasks = leftover();
         run.remaining = leftover();
-        return {
-          status: "stopped",
-          kind: "conflict",
-          lastOutput: `${outcome.task.id} の取り込みで衝突しました\n${merged.reason}`,
-          conflicts: merged.conflicts,
-        };
+        return landed;
       }
-      await removeTask(run, outcome.worktree);
       mergedIds.add(outcome.task.id);
       markIngested(run, outcome.task.id);
     }
@@ -452,6 +424,86 @@ function markIngested(run: Run, taskId: string): void {
   }
   run.remainingTasks = run.remainingTasks.filter((task) => task.id !== taskId);
   run.remaining = run.remaining.filter((task) => task.id !== taskId);
+}
+
+type TaskRun =
+  | { ok: false; reason: string }
+  | { ok: true; task: Task; worktree: Worktree };
+
+async function runTask(
+  run: Run,
+  ticket: Ticket,
+  task: Task,
+  worktree: Worktree,
+  skipImplement: boolean,
+): Promise<TaskRun> {
+  if (!skipImplement) {
+    const logsBefore = await profilerLogFiles(worktree.path);
+    await run.steps.implement({ task, worktree, ticket });
+    await keepLogs(run, task.id, worktree.path, logsBefore);
+  }
+  const verified = await verifyWorktreeBranch(worktree);
+  if (!verified.ok) {
+    return { ok: false, reason: `${task.id} の${verified.reason}` };
+  }
+  await commitAll(worktree.path, `harness: ${task.id} ${task.title}`);
+  return { ok: true, task, worktree };
+}
+
+async function landTask(
+  run: Run,
+  ticket: Ticket,
+  task: Task,
+  worktree: Worktree,
+): Promise<{ status: "landed" } | ImplementStop> {
+  const first = await takeIn(run, worktree);
+  if (first.ok) {
+    return { status: "landed" };
+  }
+  if (first.conflicts.length === 0) {
+    return conflictStop(task.id, first.reason, first.conflicts);
+  }
+
+  await runGit(integration(run).path, ["merge", "--abort"]);
+  await removeTask(run, worktree);
+  phase(`${task.id} は先の取り込みを見て続ける`);
+  const continued = await openTaskWorktree(run.repo, run.runId, task.id, integration(run).branch);
+  const redone = await runTask(run, ticket, task, continued, false);
+  if (!redone.ok) {
+    await removeTask(run, continued);
+    return { status: "stopped", kind: "branch-deviation", lastOutput: redone.reason };
+  }
+  const second = await takeIn(run, continued);
+  if (!second.ok) {
+    return conflictStop(task.id, second.reason, second.conflicts);
+  }
+  return { status: "landed" };
+}
+
+function conflictStop(taskId: string, reason: string, conflicts: string[]): ImplementStop {
+  return {
+    status: "stopped",
+    kind: "conflict",
+    lastOutput: `${taskId} の取り込みで衝突しました\n${reason}`,
+    conflicts,
+  };
+}
+
+async function takeIn(
+  run: Run,
+  worktree: Worktree,
+): Promise<{ ok: true } | { ok: false; reason: string; conflicts: string[] }> {
+  const ahead = await commitsAhead(worktree.path, integration(run).branch, worktree.branch);
+  if (ahead === 0) {
+    await removeTask(run, worktree);
+    return { ok: true };
+  }
+  const merged = await mergeBranch(integration(run), worktree.branch);
+  if (!merged.ok) {
+    return { ok: false, reason: merged.reason, conflicts: merged.conflicts };
+  }
+  await removeTask(run, worktree);
+  return { ok: true };
 }
 
 async function reviewUntilAcceptable(
