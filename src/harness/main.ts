@@ -217,13 +217,18 @@ function countResumeFlags(flags: {
   ].filter(Boolean).length;
 }
 
+function isFixtureWrites(value: unknown): boolean {
+  return Array.isArray(value) && value.every((write) => write && typeof write === "object" && typeof (write as { path?: unknown }).path === "string" && typeof (write as { content?: unknown }).content === "string");
+}
+
 function isFixtureCall(item: unknown): item is OfflineFixture["calls"][number] {
   if (!item || typeof item !== "object") return false;
   const call = item as Record<string, unknown>;
   if (typeof call.stage !== "string" || typeof call.text !== "string") return false;
   if (call.checkout !== undefined && typeof call.checkout !== "string") return false;
+  if (call.shiftIntegration !== undefined && !isFixtureWrites(call.shiftIntegration)) return false;
   if (call.writes === undefined) return true;
-  return Array.isArray(call.writes) && call.writes.every((write) => write && typeof write === "object" && typeof (write as { path?: unknown }).path === "string" && typeof (write as { content?: unknown }).content === "string");
+  return isFixtureWrites(call.writes);
 }
 
 function isDirectRun(): boolean {

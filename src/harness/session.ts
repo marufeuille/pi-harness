@@ -86,7 +86,18 @@ export function modelForFastParameter<T extends { provider: string; id: string }
   return variant;
 }
 
-export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }>; checkout?: string }> ; index: number };
+export type FixtureWrite = { path: string; content: string };
+
+export type OfflineFixture = {
+  calls: Array<{
+    stage: string;
+    text: string;
+    writes?: FixtureWrite[];
+    checkout?: string;
+    shiftIntegration?: FixtureWrite[];
+  }>;
+  index: number;
+};
 
 export type HarnessExtensionsResult = {
   extensions: Array<{ path: string }>;
@@ -190,6 +201,24 @@ export async function runRole(options: {
   if (options.fixture) {
     const call = options.fixture.calls[options.fixture.index++];
     if (!call || call.stage !== options.stage) throw new Error(`固定応答の呼び出し段階が一致しません: ${options.stage}`);
+    if (call.shiftIntegration) {
+      if (options.stage !== "implement") throw new Error("実装以外の段階では shiftIntegration を指定できません");
+      const integrationPath = path.resolve(options.cwd, "../../integration");
+      for (const { path: relative, content } of call.shiftIntegration) {
+        const target = assertWriteAllowed("edit", integrationPath, relative);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, content, "utf8");
+      }
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      await exec("git", ["add", "-A"], { cwd: integrationPath });
+      await exec(
+        "git",
+        ["-c", "user.name=harness", "-c", "user.email=harness@localhost", "-c", "commit.gpgsign=false", "commit", "-m", "shift integration"],
+        { cwd: integrationPath },
+      );
+    }
     if (call.writes) {
       if (options.stage !== "implement") throw new Error("実装以外の段階では writes を指定できません");
       for (const { path: relative, content } of call.writes) {
