@@ -1,0 +1,19 @@
+{
+  "first": {
+    "calls": [
+      { "stage": "clarify", "text": "{\"decision\":\"proceed\",\"assumptions\":[\"名前は必須\"]}" },
+      { "stage": "plan", "text": "{\"assumptions\":[],\"tasks\":[{\"id\":\"T1\",\"title\":\"Add greeting\",\"instructions\":\"Add hello.txt containing hello\",\"dependsOn\":[]}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "hello.txt", "content": "hello\n" }] },
+      { "stage": "review", "text": "{\"decision\":\"fix\",\"issues\":[{\"id\":\"fix-a\",\"title\":\"a\",\"dependsOn\":[],\"instructions\":\"a\"},{\"id\":\"fix-b\",\"title\":\"b\",\"dependsOn\":[],\"instructions\":\"b\"}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "a.txt", "content": "a\n" }] },
+      { "stage": "implement", "text": "", "writes": [{ "path": "b.txt", "content": "b\n" }] },
+      { "stage": "review", "text": "{\"decision\":\"fix\",\"issues\":[{\"id\":\"fix-a\",\"title\":\"a\",\"dependsOn\":[],\"instructions\":\"a\"}]}" }
+    ]
+  },
+  "resume": {
+    "calls": [
+      { "stage": "implement", "text": "", "writes": [{ "path": "a.txt", "content": "a-fixed\n" }] },
+      { "stage": "review", "text": "{\"decision\":\"pass\",\"concerns\":[\"文言は後でよい\"]}" }
+    ]
+  }
+}

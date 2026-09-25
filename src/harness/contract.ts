@@ -28,6 +28,7 @@ export type Clarification =
 export type Review =
   | { decision: "pass"; concerns: string[] }
   | { decision: "fix"; issues: Task[] }
+  | { decision: "return"; questions: string[] }
   | { decision: "escalate"; reason: string }
   | JsonReadFailure;
 
@@ -49,6 +50,7 @@ export type PlanInput = {
   ticket: Ticket;
   assumptions: string[];
   cwd: string;
+  remaining?: Task[];
 };
 
 export type ImplementInput = {
@@ -140,6 +142,9 @@ export function parseReview(value: unknown): Review {
   }
   if (record.decision === "fix" && Array.isArray(record.issues) && record.issues.length > 0) {
     return { decision: "fix", issues: record.issues.map((issue) => parseTask(issue)) };
+  }
+  if (record.decision === "return" && isStringArray(record.questions) && record.questions.length > 0) {
+    return { decision: "return", questions: record.questions };
   }
   if (record.decision === "escalate" && typeof record.reason === "string" && record.reason.length > 0) {
     return { decision: "escalate", reason: record.reason };

@@ -15,7 +15,7 @@ export async function loadLinearIssue(
   input: string,
   options: { apiKey?: string; fetch?: FetchLike } = {},
 ): Promise<LinearIssueResult> {
-  const issueId = parseIssueId(input);
+  const issueId = parseLinearIssueId(input);
   if (!issueId) return { ok: false, reason: "invalid_input" };
 
   const apiKey = options.apiKey ?? process.env.LINEAR_API_KEY;
@@ -75,7 +75,7 @@ export async function updateLinearIssueState(
   stateName: "In Progress" | "Done",
   options: { apiKey?: string; fetch?: FetchLike } = {},
 ): Promise<void> {
-  const issueId = parseIssueId(input);
+  const issueId = parseLinearIssueId(input);
   if (!issueId) throw new Error("Linear state update failed: invalid_input");
   const apiKey = options.apiKey ?? process.env.LINEAR_API_KEY;
   if (!apiKey) throw new Error("Linear state update failed: authentication");
@@ -112,7 +112,7 @@ export async function updateLinearIssueState(
   if (!isRecord(result) || result.success !== true) throw new Error("Linear state update failed: update_failed");
 }
 
-function parseIssueId(input: string): string | undefined {
+export function parseLinearIssueId(input: string): string | undefined {
   const value = input.trim();
   if (!value) return undefined;
   if (!/^https?:\/\//i.test(value)) return value;

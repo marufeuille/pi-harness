@@ -3,14 +3,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  createAgentSession,
-  DefaultResourceLoader,
-  ModelRuntime,
-  SessionManager,
-  SettingsManager,
-  type AgentSession,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import type { ModelSpec } from "./models.ts";
 import { modelCatalog, registerRuntimeModel, resolveAndValidateModel } from "./models.ts";
@@ -93,7 +86,7 @@ export function modelForFastParameter<T extends { provider: string; id: string }
   return variant;
 }
 
-export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }> }> ; index: number };
+export type OfflineFixture = { calls: Array<{ stage: string; text: string; writes?: Array<{ path: string; content: string }>; checkout?: string }> ; index: number };
 
 export type HarnessExtensionsResult = {
   extensions: Array<{ path: string }>;
@@ -112,6 +105,13 @@ export async function createHarnessSession(options: {
   tools: string[];
   thinkingLevel?: string;
 }): Promise<{ session: AgentSession; modelRuntime: ModelRuntime }> {
+  const {
+    createAgentSession,
+    DefaultResourceLoader,
+    ModelRuntime,
+    SessionManager,
+    SettingsManager,
+  } = await import("@earendil-works/pi-coding-agent");
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
     modelsStorePath: path.join(agentDir, "models-store.json"),
@@ -197,6 +197,12 @@ export async function runRole(options: {
         await fs.mkdir(path.dirname(target), { recursive: true });
         await fs.writeFile(target, content, "utf8");
       }
+    }
+    if (call.checkout) {
+      if (options.stage !== "implement") throw new Error("実装以外の段階では checkout を指定できません");
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      await promisify(execFile)("git", ["checkout", "-b", call.checkout], { cwd: options.cwd });
     }
     return call.text;
   }

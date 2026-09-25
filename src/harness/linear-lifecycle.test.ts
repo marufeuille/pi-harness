@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runLinearLifecycle, updateLinearStateResult } from "./linear-lifecycle.ts";
+import { runLinearLifecycle, resolveResumeLinearIssueId, updateLinearStateResult } from "./linear-lifecycle.ts";
 import type { WorkflowResult } from "./workflow.ts";
 
 const result = (status: WorkflowResult["status"]) => ({ status } as WorkflowResult);
@@ -57,3 +57,49 @@ test("workflow exceptions do not trigger completion or rollback", async () => {
   await assert.rejects(runLinearLifecycle({ issueId: "X", updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; }, runWorkflow: async () => { throw new Error("failed"); } }), /failed/);
   assert.deepEqual(calls, ["In Progress"]);
 });
+
+test("resume keeps In Progress and still completes only on ready or production-ok", async () => {
+  const calls: string[] = [];
+  const stopped = await runLinearLifecycle({
+    issueId: "ABC-1",
+    resume: true,
+    updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; },
+    runWorkflow: async () => result("escalated"),
+  });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(stopped, { ok: true, result: result("escalated") });
+
+  const ready = await runLinearLifecycle({
+    issueId: "ABC-1",
+    resume: true,
+    updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; },
+    runWorkflow: async () => result("ready"),
+  });
+  assert.deepEqual(calls, ["Done"]);
+  assert.equal(ready.ok, true);
+
+  calls.length = 0;
+  const returned = await runLinearLifecycle({
+    issueId: "ABC-1",
+    resume: true,
+    updateLinearIssueState: async (_id, state) => { calls.push(state); return { ok: true }; },
+    runWorkflow: async () => result("returned"),
+  });
+  assert.deepEqual(calls, []);
+  assert.equal(returned.ok, true);
+});
+
+test("resume Linear identity matches saved issue and rejects a different issue before work", () => {
+  assert.deepEqual(resolveResumeLinearIssueId({ saved: "ABC-1" }), { ok: true, issueId: "ABC-1" });
+  assert.deepEqual(resolveResumeLinearIssueId({ requested: "ABC-1", saved: "ABC-1" }), { ok: true, issueId: "ABC-1" });
+  assert.deepEqual(
+    resolveResumeLinearIssueId({ requested: "https://linear.app/acme/issue/ABC-1/example", saved: "ABC-1" }),
+    { ok: true, issueId: "ABC-1" },
+  );
+  assert.deepEqual(resolveResumeLinearIssueId({ saved: undefined }), { ok: true, issueId: undefined });
+  const mismatch = resolveResumeLinearIssueId({ requested: "XYZ-9", saved: "ABC-1" });
+  assert.equal(mismatch.ok, false);
+  if (!mismatch.ok) assert.match(mismatch.reason, /異なる/);
+  assert.equal(resolveResumeLinearIssueId({ requested: "ABC-1" }).ok, false);
+});
+

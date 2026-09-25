@@ -28,7 +28,7 @@ test("曖昧なチケットは質問付きで突き返す", () => {
   });
 });
 
-test("検品は pass / fix / escalate だけを受け付ける", () => {
+test("検品は pass / fix / return / escalate を受け付ける", () => {
   assert.equal(parseReview({ decision: "pass", concerns: ["ログの文言"] }).decision, "pass");
   assert.equal(
     parseReview({
@@ -37,5 +37,11 @@ test("検品は pass / fix / escalate だけを受け付ける", () => {
     }).decision,
     "fix",
   );
+  assert.deepEqual(parseReview({ decision: "return", questions: ["失敗時の戻り値は何か"] }), {
+    decision: "return",
+    questions: ["失敗時の戻り値は何か"],
+  });
+  assert.equal(parseReview({ decision: "escalate", reason: "人に返す" }).decision, "escalate");
   assert.throws(() => parseReview({ decision: "pass", concerns: "文字列" }), /契約/);
+  assert.throws(() => parseReview({ decision: "return", questions: [] }), /契約/);
 });

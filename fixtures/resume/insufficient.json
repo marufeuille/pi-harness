@@ -1,0 +1,15 @@
+{
+  "first": {
+    "calls": [
+      { "stage": "clarify", "text": "{\"decision\":\"proceed\",\"assumptions\":[\"名前は必須\"]}" },
+      { "stage": "plan", "text": "{\"assumptions\":[],\"tasks\":[{\"id\":\"T1\",\"title\":\"Add greeting\",\"instructions\":\"Add hello.txt containing hello\",\"dependsOn\":[]}]}" },
+      { "stage": "implement", "text": "", "writes": [{ "path": "hello.txt", "content": "hello\n" }] },
+      { "stage": "review", "text": "{\"decision\":\"return\",\"questions\":[\"失敗時の戻り値は何か\"]}" }
+    ]
+  },
+  "resume": {
+    "calls": [
+      { "stage": "review", "text": "{\"decision\":\"pass\",\"concerns\":[]}" }
+    ]
+  }
+}
