@@ -85,22 +85,45 @@ export function isEnvironmentCheckFailure(output: string): boolean {
   );
 }
 
+const RESUME_ACTION_MARKERS: [ResumeActionName, RegExp][] = [
+  ["extraRounds", /追加回数/],
+  ["hint", /ヒント/],
+  ["replanRemaining", /再プラン|プランを作り直/],
+  ["answers", /質問/],
+  ["continueFromIngest", /取り込み/],
+];
+
+export function recommendedResumeAction(kind: StopKind): ResumeActionName {
+  return allowedResumeActions(kind)[0]!;
+}
+
+export function mentionedResumeActions(recommendation: string): ResumeActionName[] {
+  return RESUME_ACTION_MARKERS.filter(([, pattern]) => pattern.test(recommendation)).map(([action]) => action);
+}
+
 export function recommendationFor(kind: StopKind): string {
-  switch (kind) {
-    case "decreasing-fatal":
+  return recommendationForAction(kind, recommendedResumeAction(kind));
+}
+
+function recommendationForAction(kind: StopKind, action: ResumeActionName): string {
+  switch (action) {
+    case "extraRounds":
       return "追加回数を指定して、同じ統合ブランチの残件を続ける";
-    case "stalled":
-      return "人のヒントを残件に足すか、残件だけプランを作り直す";
-    case "changing":
-      return "追加回数、人のヒント、残件の再プランのいずれかを選ぶ";
-    case "insufficient-requirements":
+    case "hint":
+      return "人のヒントを残件に足して続ける";
+    case "replanRemaining":
+      return "残件だけプランを作り直してから続ける";
+    case "answers":
       return "質問に回答する";
-    case "conflict":
-      return "衝突を解消した同じブランチから取り込み以降を続ける";
-    case "branch-deviation":
-      return "作業ツリーのブランチを戻した同じブランチから取り込み以降を続ける";
-    case "environment-check":
-      return "環境の問題を解消した同じブランチから取り込み以降を続ける";
+    case "continueFromIngest":
+      switch (kind) {
+        case "conflict":
+          return "衝突を解消した同じブランチから取り込み以降を続ける";
+        case "branch-deviation":
+          return "作業ツリーのブランチを戻した同じブランチから取り込み以降を続ける";
+        default:
+          return "環境の問題を解消した同じブランチから取り込み以降を続ける";
+      }
   }
 }
 
